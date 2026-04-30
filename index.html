@@ -186,9 +186,20 @@
       jumpPower: 10,      // lower initial jump but 5 air jumps
       weight: 0.75,       // very light — dies to strong hits earlier
       description: 'Fast floaty flier. Five jumps and huge air mobility.',
+    },
+    theo: {
+      name: 'Theo',
+      color: '#5a2a8a',
+      color2: '#c060ff',
+      archetype: 'Controller',
+      walkSpeed: 3.2,
+      dashSpeed: 5.2,
+      jumpPower: 12.5,
+      weight: 1.0,
+      description: 'Dark-energy controller. Absorbs, charges, teleports.',
     }
   };
-  const CHAR_KEYS = ['nico', 'derek', 'rhys', 'greyson', 'kele', 'jonah'];
+  const CHAR_KEYS = ['nico', 'derek', 'rhys', 'greyson', 'kele', 'jonah', 'theo'];
 
   // ---------- CONTROL MAPS ----------
   const controls = [
@@ -380,7 +391,8 @@
       else if (this.key === 'rhys') this.rhysSpecial(dir);
       else if (this.key === 'greyson') this.greysonSpecial(dir);
       else if (this.key === 'kele') this.keleSpecial(dir);
-      else this.jonahSpecial(dir);
+      else if (this.key === 'jonah') this.jonahSpecial(dir);
+      else this.theoSpecial(dir);
     }
 
     startAttack(dir) {
@@ -699,6 +711,62 @@
       }
     }
 
+    // --- THEO SPECIALS ---
+    theoSpecial(dir) {
+      if (dir === 'neutral') {
+        // Charge Bomb — held special: damage scales with charge time.
+        // Detonates when the special key is released, max charge reached, or
+        // if the player gets hit. Deals AoE damage similar to a grenade.
+        this.moveState = {
+          type: 'chargeBomb', timer: 240, charge: 0, maxCharge: 120,
+          released: false,
+        };
+        // Tiny step-stop so Theo plants
+        this.vx *= 0.4;
+      } else if (dir === 'up') {
+        // Teleport — vanishes for a few frames then reappears in the
+        // direction the player is currently holding (8-way). Brief invuln.
+        const ctrl = controls[this.index];
+        const left = keys[ctrl.left], right = keys[ctrl.right];
+        const up = keys[ctrl.up], down = keys[ctrl.down];
+        let dx = 0, dy = 0;
+        if (left) dx -= 1;
+        if (right) dx += 1;
+        if (up) dy -= 1;
+        if (down) dy += 1;
+        // Default to "up" if no horizontal direction held (this is the up-special)
+        if (dx === 0 && dy === 0) dy = -1;
+        const mag = Math.hypot(dx, dy) || 1;
+        const dist = 200;
+        this.moveState = {
+          type: 'teleport', timer: 28, phase: 'vanish', phaseTimer: 0,
+          tx: this.x + (dx / mag) * dist,
+          ty: this.y + (dy / mag) * dist,
+        };
+        this.invuln = 24;
+        if (dx !== 0) this.facing = dx > 0 ? 1 : -1;
+        spawnEffect(this.cx, this.cy, '#c060ff', 22, 30);
+        spawnEffect(this.cx, this.cy, '#5a2a8a', 18, 24);
+      } else if (dir === 'side') {
+        // Power Blast — energy rifle shot with bayonet. Bayonet hitbox is
+        // active up close on the active frames; the laser shot fires at the
+        // end of the windup and travels forward. At close range both connect.
+        this.moveState = {
+          type: 'powerBlast', timer: 28, active: [6, 16], fired: false,
+          hasHit: null,
+        };
+        this.vx = this.facing * 1.5;
+      } else if (dir === 'down') {
+        // Absorb — opens a short absorption field in front of Theo. Catches
+        // projectiles and converts each one's damage into a heal for Theo.
+        this.moveState = {
+          type: 'absorb', timer: 30, active: [4, 26], healed: 0,
+        };
+        this.vx *= 0.5;
+        this.invuln = 4;
+      }
+    }
+
     update() {
       if (this.respawnTimer > 0) {
         this.respawnTimer--;
@@ -921,6 +989,83 @@
         if (this.moveState && this.moveState.type === 'poisonLob' && this.moveState.timer > 12) {
           if (Math.random() < 0.4) spawnEffect(this.cx, this.y - 6, '#b6ff6a', 10, 6);
         }
+        // Theo: Charge Bomb — accumulate charge while special is held; detonate on release/cap
+        if (this.moveState && this.moveState.type === 'chargeBomb') {
+          const m = this.moveState;
+          const ctrl = controls[this.index];
+          const stillHeld = keys[ctrl.special];
+          if (!m.released) {
+            m.charge = Math.min(m.charge + 1, m.maxCharge);
+            // Plant feet during charge
+            if (this.onGround) this.vx *= 0.6;
+            // Visual: pulsing dark sparks at hands while charging
+            if (Math.random() < 0.4 + m.charge / m.maxCharge * 0.5) {
+              spawnEffect(this.cx + (Math.random()-0.5) * 30,
+                          this.cy + (Math.random()-0.5) * 30,
+                          m.charge > m.maxCharge * 0.6 ? '#c060ff' : '#5a2a8a',
+                          12, 6 + m.charge / 12);
+            }
+            // Detonate on release or full charge
+            if (!stillHeld || m.charge >= m.maxCharge) {
+              m.released = true;
+              this.detonateChargeBomb(m.charge, m.maxCharge);
+              this.moveState.timer = 14; // short endlag-ish wind-down
+            }
+          }
+        }
+        // Theo: Teleport — vanish phase locks motion, then jump to target and reappear
+        if (this.moveState && this.moveState.type === 'teleport') {
+          const m = this.moveState;
+          this.vx = 0; this.vy = 0;
+          m.phaseTimer++;
+          if (m.phase === 'vanish' && m.phaseTimer >= 8) {
+            // Snap to destination, clamped to blastzone bounds with a margin
+            this.x = Math.max(BLAST_LEFT + 20, Math.min(BLAST_RIGHT - 20 - this.w, m.tx));
+            this.y = Math.max(BLAST_TOP + 20, Math.min(BLAST_BOTTOM - 20 - this.h, m.ty));
+            m.phase = 'arrive';
+            m.phaseTimer = 0;
+            spawnEffect(this.cx, this.cy, '#c060ff', 22, 32);
+            spawnEffect(this.cx, this.cy, '#5a2a8a', 18, 26);
+          } else if (m.phase === 'vanish') {
+            // Sparkle while vanished
+            if (Math.random() < 0.6) spawnEffect(this.cx + (Math.random()-0.5)*20, this.cy + (Math.random()-0.5)*30, '#c060ff', 12, 6);
+          } else if (m.phase === 'arrive') {
+            // Settle in: small puff
+            if (Math.random() < 0.5) spawnEffect(this.cx + (Math.random()-0.5)*30, this.cy + (Math.random()-0.5)*30, '#c060ff', 10, 8);
+          }
+        }
+        // Theo: Power Blast — fire the laser shot at the start of the active window
+        if (this.moveState && this.moveState.type === 'powerBlast') {
+          const m = this.moveState;
+          if (this.onGround) this.vx *= 0.7;
+          const elapsed = 28 - m.timer;
+          if (!m.fired && elapsed >= m.active[0]) {
+            m.fired = true;
+            projectiles.push({
+              owner: this, x: this.cx + this.facing * 26, y: this.cy - 2,
+              vx: this.facing * 14, vy: 0, w: 28, h: 6,
+              life: 32, damage: 7, kbx: this.facing * 4, kby: -1.5,
+              type: 'energyBlast', gravity: 0,
+            });
+            spawnEffect(this.cx + this.facing * 30, this.cy, '#c060ff', 14, 18);
+          }
+        }
+        // Theo: Absorb — keep stance, draw vortex visuals
+        if (this.moveState && this.moveState.type === 'absorb') {
+          if (this.onGround) this.vx *= 0.5;
+          const m = this.moveState;
+          const elapsed = 30 - m.timer;
+          if (elapsed >= m.active[0] && elapsed <= m.active[1]) {
+            // Inhale particles toward Theo
+            if (Math.random() < 0.7) {
+              const ang = Math.random() * Math.PI - Math.PI/2;
+              const dist = 24;
+              spawnEffect(this.cx + this.facing * 24 + Math.cos(ang) * dist,
+                          this.cy + Math.sin(ang) * dist,
+                          '#c060ff', 10, 6);
+            }
+          }
+        }
       }
 
       // Poisoned visual drip
@@ -1099,6 +1244,40 @@
       this.ledgeGrab = null;
     }
 
+    // Theo: detonate the charge bomb. Damage and KB scale with charge fraction.
+    detonateChargeBomb(charge, maxCharge) {
+      const cx = this.cx + this.facing * 24;
+      const cy = this.cy;
+      const frac = charge / maxCharge;
+      const R = 60 + frac * 50;          // 60..110 radius
+      const dmg = 6 + frac * 18;         // 6..24 damage
+      const kbBase = 4 + frac * 7;       // KB scaling
+      // Bright burst visuals — bigger when fully charged
+      spawnEffect(cx, cy, '#c060ff', 30, R);
+      spawnEffect(cx, cy, '#5a2a8a', 26, R * 0.8);
+      spawnEffect(cx, cy, '#ffffff', 18, R * 0.45);
+      for (const f of fighters) {
+        if (f === this) continue;
+        if (f.respawnTimer > 0 || f.invuln > 0) continue;
+        const dx = f.cx - cx, dy = f.cy - cy;
+        const dist = Math.hypot(dx, dy);
+        if (dist > R) continue;
+        const fall = 1 - (dist / R) * 0.6;
+        const dirN = dist < 1 ? 1 : 1 / dist;
+        const kbx = dx * dirN * kbBase;
+        const kby = Math.min(-3, dy * dirN * kbBase - 2);
+        // Counter check
+        if (f.counterActive > 0) {
+          this.takeDamage(dmg * fall * 1.5, -kbx * 1.3, -5, f);
+          spawnEffect(f.cx, f.cy, '#ffffff', 20, 36);
+          f.counterActive = 0;
+          f.counterCooldown = 60;
+          continue;
+        }
+        f.takeDamage(dmg * fall, kbx, kby, this);
+      }
+    }
+
     // Melee attack hitbox (for burn dash, katana slash, regular attacks)
     getHitbox() {
       if (!this.moveState) return null;
@@ -1198,6 +1377,15 @@
         return { x: this.x - 2, y: this.y + 6, w: this.w + 4, h: this.h - 4,
                  damage: 11, kbx: 0, kby: 10, type: 'spike' };
       }
+      // Theo: Power Blast bayonet — close-range stab during the active window
+      if (t === 'powerBlast') {
+        const elapsed = 28 - this.moveState.timer;
+        const [a, b] = this.moveState.active;
+        if (elapsed < a || elapsed > b) return null;
+        return { x: this.facing === 1 ? this.x + this.w - 2 : this.x - 32,
+                 y: this.y + 14, w: 34, h: 22,
+                 damage: 8, kbx: this.facing * 4, kby: -2.5, type: 'energy' };
+      }
       // Regular attacks: check active frame window
       if (t.startsWith('atk_')) {
         const m = this.moveState;
@@ -1243,6 +1431,15 @@
 
     render(ctx) {
       if (this.respawnTimer > 0) return;
+      // Theo: while vanished mid-teleport, draw only a sparkle trail
+      if (this.moveState && this.moveState.type === 'teleport' && this.moveState.phase === 'vanish') {
+        ctx.strokeStyle = 'rgba(192, 96, 255, 0.6)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(this.cx, this.cy, 12 + Math.sin(this.moveState.phaseTimer * 0.7) * 4, 0, Math.PI*2);
+        ctx.stroke();
+        return;
+      }
       const c = this.def;
 
       // Ledge hang — pulsing highlight to show invulnerable hang
@@ -1356,7 +1553,8 @@
       ctx.fillStyle = '#000';
       ctx.font = 'bold 10px sans-serif';
       ctx.textAlign = 'center';
-      ctx.fillText(this.key === 'nico' ? 'N' : 'D', this.cx, this.y + 42);
+      const emblemMap = { nico:'N', derek:'D', rhys:'R', greyson:'G', kele:'K', jonah:'J', theo:'T' };
+      ctx.fillText(emblemMap[this.key] || '?', this.cx, this.y + 42);
 
       // Player indicator (arrow above head)
       ctx.fillStyle = this.index === 0 ? '#ff6a2a' : '#4ab8ff';
@@ -1397,6 +1595,7 @@
               greyson: { main: '#6a7a4a', hot: '#d4c77a' },
               kele: { main: '#a34040', hot: '#f0d050' },
               jonah: { main: '#e070b0', hot: '#a0e0d0' },
+              theo: { main: '#5a2a8a', hot: '#c060ff' },
             };
             const { main: mainColor, hot: hotColor } = palettes[this.key];
             // filled swipe shape
@@ -1711,6 +1910,138 @@
             }
           }
         }
+        // Theo: Charge Bomb — pulsing dark sphere in front of Theo, scales with charge
+        if (t === 'chargeBomb') {
+          const m = this.moveState;
+          const frac = m.charge / m.maxCharge;
+          if (!m.released) {
+            const bx = this.cx + this.facing * 22;
+            const by = this.cy;
+            const r = 6 + frac * 20;
+            // Outer glow ring
+            ctx.strokeStyle = `rgba(192, 96, 255, ${0.4 + frac * 0.5})`;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(bx, by, r + 6 + Math.sin(Date.now() * 0.02) * 2, 0, Math.PI*2);
+            ctx.stroke();
+            // Core orb
+            ctx.fillStyle = '#5a2a8a';
+            ctx.beginPath();
+            ctx.arc(bx, by, r, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = `rgba(192, 96, 255, ${0.5 + frac * 0.5})`;
+            ctx.beginPath();
+            ctx.arc(bx, by, r * 0.7, 0, Math.PI*2);
+            ctx.fill();
+            // White-hot core when nearly full
+            if (frac > 0.7) {
+              ctx.fillStyle = '#ffffff';
+              ctx.beginPath();
+              ctx.arc(bx, by, r * 0.3, 0, Math.PI*2);
+              ctx.fill();
+            }
+            // Charge bar above head
+            const barW = 30;
+            ctx.fillStyle = 'rgba(0,0,0,0.5)';
+            ctx.fillRect(this.cx - barW/2, this.y - 10, barW, 4);
+            ctx.fillStyle = frac >= 1 ? '#ffffff' : '#c060ff';
+            ctx.fillRect(this.cx - barW/2, this.y - 10, barW * frac, 4);
+          }
+        }
+        // Theo: Power Blast — rifle with bayonet drawn forward
+        if (t === 'powerBlast') {
+          const ox = this.facing === 1 ? this.x + this.w - 4 : this.x - 30;
+          const oy = this.y + 22;
+          // Rifle body
+          ctx.fillStyle = '#2a1a3a';
+          ctx.fillRect(ox, oy, 30, 6);
+          ctx.fillStyle = '#5a2a8a';
+          ctx.fillRect(ox, oy + 1, 30, 4);
+          // Bayonet blade
+          const bayonetX = this.facing === 1 ? ox + 30 : ox;
+          ctx.fillStyle = '#c0c0e0';
+          ctx.beginPath();
+          ctx.moveTo(bayonetX, oy);
+          ctx.lineTo(bayonetX + this.facing * 14, oy + 3);
+          ctx.lineTo(bayonetX, oy + 6);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = '#c060ff';
+          ctx.lineWidth = 1;
+          ctx.stroke();
+          // Muzzle flash on the firing frame
+          if (this.moveState.fired && (28 - this.moveState.timer) < 10) {
+            const muzzleX = this.facing === 1 ? ox + 30 : ox;
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(muzzleX, oy + 3, 5, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = 'rgba(192, 96, 255, 0.7)';
+            ctx.beginPath();
+            ctx.arc(muzzleX, oy + 3, 9, 0, Math.PI*2);
+            ctx.fill();
+          }
+        }
+        // Theo: Absorb — swirling vortex in front of Theo during the active window
+        if (t === 'absorb') {
+          const m = this.moveState;
+          const elapsed = 30 - m.timer;
+          const active = elapsed >= m.active[0] && elapsed <= m.active[1];
+          if (active) {
+            const fx = this.facing === 1 ? this.x + this.w + 14 : this.x - 14;
+            const fy = this.cy;
+            // Outer vortex ring
+            const t2 = Date.now() * 0.012;
+            for (let k = 0; k < 3; k++) {
+              ctx.strokeStyle = `rgba(192, 96, 255, ${0.55 - k * 0.15})`;
+              ctx.lineWidth = 3 - k;
+              ctx.beginPath();
+              ctx.arc(fx, fy, 18 + k * 6 + Math.sin(t2 + k) * 2, 0, Math.PI*2);
+              ctx.stroke();
+            }
+            // Field box outline (semi-transparent)
+            const fieldX = this.facing === 1 ? this.x + this.w - 6 : this.x - 54;
+            ctx.fillStyle = 'rgba(90, 42, 138, 0.18)';
+            ctx.fillRect(fieldX, this.y - 4, 60, this.h + 8);
+            ctx.strokeStyle = 'rgba(192, 96, 255, 0.45)';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(fieldX, this.y - 4, 60, this.h + 8);
+            // Inward sparkles
+            for (let k = 0; k < 4; k++) {
+              const ang = t2 * 2 + k * (Math.PI / 2);
+              const rad = 16;
+              ctx.fillStyle = '#c060ff';
+              ctx.beginPath();
+              ctx.arc(fx + Math.cos(ang) * rad, fy + Math.sin(ang) * rad, 2, 0, Math.PI*2);
+              ctx.fill();
+            }
+            // Heal counter
+            if (m.healed > 0) {
+              ctx.fillStyle = '#c060ff';
+              ctx.font = 'bold 11px sans-serif';
+              ctx.textAlign = 'center';
+              ctx.fillText(`+${Math.floor(m.healed)}`, this.cx, this.y - 12);
+              ctx.textAlign = 'left';
+            }
+          }
+        }
+        // Theo: Teleport arrival — bright burst lingers for a few frames
+        if (t === 'teleport' && this.moveState.phase === 'arrive') {
+          const age = this.moveState.phaseTimer;
+          if (age < 14) {
+            const a = 1 - age / 14;
+            ctx.strokeStyle = `rgba(192, 96, 255, ${a})`;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.arc(this.cx, this.cy, 14 + age * 2, 0, Math.PI*2);
+            ctx.stroke();
+            ctx.strokeStyle = `rgba(255, 255, 255, ${a * 0.6})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(this.cx, this.cy, 8 + age * 1.5, 0, Math.PI*2);
+            ctx.stroke();
+          }
+        }
       }
 
       ctx.globalAlpha = 1;
@@ -1828,6 +2159,36 @@
 
       // off-screen
       if (p.x < -100 || p.x > W + 100) p.life = 0;
+
+      // Theo's Absorb field — eats projectiles in a forward arc and heals Theo
+      // for each one consumed. Runs before damage resolution so absorbed shots
+      // never hit anyone (including Theo).
+      let absorbed = false;
+      for (const f of fighters) {
+        if (f === p.owner) continue;
+        if (!f.moveState || f.moveState.type !== 'absorb') continue;
+        const m = f.moveState;
+        const elapsed = 30 - m.timer;
+        if (elapsed < m.active[0] || elapsed > m.active[1]) continue;
+        // Field box: 60×80 in front of Theo
+        const fieldX = f.facing === 1 ? f.x + f.w - 6 : f.x - 54;
+        const field = { x: fieldX, y: f.y - 4, w: 60, h: f.h + 8 };
+        const pBox2 = { x: p.x, y: p.y, w: p.w, h: p.h };
+        if (!rectsOverlap(field, pBox2)) continue;
+        // Heal Theo by the projectile's damage (clamped) and consume the shot
+        const heal = Math.max(2, p.damage || 4);
+        f.damage = Math.max(0, f.damage - heal);
+        m.healed += heal;
+        spawnEffect(f.cx, f.cy, '#c060ff', 22, 32);
+        spawnEffect(p.x + p.w/2, p.y + p.h/2, '#5a2a8a', 16, 22);
+        p.life = 0;
+        absorbed = true;
+        break;
+      }
+      if (absorbed) {
+        if (p.life <= 0) projectiles.splice(i, 1);
+        continue;
+      }
 
       // collide with fighters
       for (const f of fighters) {
@@ -2299,6 +2660,21 @@
             ctx.stroke();
           }
         }
+      } else if (p.type === 'energyBlast') {
+        // Theo's Power Blast laser — bright violet beam with a white core
+        const cx = p.x + p.w/2, cy = p.y + p.h/2;
+        ctx.fillStyle = 'rgba(192, 96, 255, 0.4)';
+        ctx.fillRect(p.x - 4, p.y - 2, p.w + 8, p.h + 4);
+        ctx.fillStyle = '#c060ff';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(p.x + 4, p.y + p.h/2 - 1, p.w - 8, 2);
+        // Tip flare
+        ctx.fillStyle = '#ffffff';
+        const tipX = p.vx > 0 ? p.x + p.w : p.x;
+        ctx.beginPath();
+        ctx.arc(tipX, cy, 3 + Math.sin(p.life * 0.6) * 1, 0, Math.PI*2);
+        ctx.fill();
       }
     }
   }
@@ -2506,13 +2882,15 @@
       'Greyson (Hybrid):      neutral→Grenade      side→Hard Punch   up→Mega Jump    down→Cmd Grab  · grab pierces shield',
       'Kele    (Heavyweight): neutral→Power Punch  side→Suplex       up→Uppercut     down→Body Slam · slow, huge damage',
       'Jonah   (Flier):       neutral→Beet Blast   side→Mach 5       up→Glide        down→Ultra Spike · 5 jumps, floaty',
+      'Theo    (Controller):  neutral→Charge Bomb  side→Power Blast  up→Teleport     down→Absorb · hold neutral to charge',
     ];
-    ctx.fillText(hints[0], 30, H - 175);
-    ctx.fillText(hints[1], 30, H - 160);
-    ctx.fillText(hints[2], 30, H - 145);
-    ctx.fillText(hints[3], 30, H - 130);
-    ctx.fillText(hints[4], 30, H - 115);
-    ctx.fillText(hints[5], 30, H - 100);
+    ctx.fillText(hints[0], 30, H - 190);
+    ctx.fillText(hints[1], 30, H - 175);
+    ctx.fillText(hints[2], 30, H - 160);
+    ctx.fillText(hints[3], 30, H - 145);
+    ctx.fillText(hints[4], 30, H - 130);
+    ctx.fillText(hints[5], 30, H - 115);
+    ctx.fillText(hints[6], 30, H - 100);
     ctx.textAlign = 'left';
   }
 
