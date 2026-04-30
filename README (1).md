@@ -6,7 +6,7 @@ Drop `index.html` into any browser or static host and play.
 
 ## Status
 
-Playable prototype. Local 2-player only (shared keyboard). Six characters, full move sets,
+Playable prototype. Local 2-player only (shared keyboard). Seven characters, full move sets,
 camera tracking, ledge recoveries, and stock-based matches.
 
 ## Quick start
@@ -39,7 +39,7 @@ down air — down air is a spike).
 
 ## Roster
 
-Six characters with distinct archetypes. All have four directional specials, ground tilts
+Seven characters with distinct archetypes. All have four directional specials, ground tilts
 (jab/forward/up/down) and full aerials. Stats below are relative.
 
 ### Nico — Rushdown (orange/yellow)
@@ -86,6 +86,13 @@ Lightest weight, 5 air jumps, floaty gravity.
 - **Up**: Glide (60 frames of near-zero fall speed)
 - **Down**: Ultra Spike (vertical plunge, bounces off surfaces)
 
+### Theo — Controller (purple/cyan)
+Medium stats, battlefield-control specialist with dark-energy tools.
+- **Neutral**: Charge Bomb (hold special to charge, release to detonate AoE — 7→25 dmg, 55→120 radius)
+- **Side**: Power Blast (energy rifle shot — laser projectile + close-range bayonet thrust; both connect at point-blank)
+- **Up**: Teleport (vanishes briefly, reappears 200px in the directional key pressed; helpless after if airborne)
+- **Down**: Absorb (consumes incoming projectiles within 80px and converts their damage into healing at 1.2×)
+
 ## Core mechanics
 
 - **Stock match** — first to knock the other off 3 times wins.
@@ -96,10 +103,10 @@ Lightest weight, 5 air jumps, floaty gravity.
 - **Grabs** — Greyson's Cmd Grab and Kele's Suplex pierce shields. Counter beats them.
 - **Free-fall (helpless)** — propulsion specials lock you out of further actions until
   you land or get hit. Affects: Fire Propulsion, Burning Dash, Katana Dash, Toxic Headbutt,
-  Mega Jump, Uppercut, Glide. Drift-only horizontal control during helpless.
+  Mega Jump, Uppercut, Glide, Teleport. Drift-only horizontal control during helpless.
 - **End lag** — dash moves apply input-locking recovery frames on landing:
   Mach 5 (22f), Burning Dash (20f), Toxic Headbutt (18f), Katana/Fire Propulsion/Mega Jump
-  (12f), Glide/Uppercut (10f). Getting hit clears endlag.
+  (12f), Glide/Uppercut/Teleport (10f). Getting hit clears endlag.
 - **Poison DoT** — Rhys-only status. 1.5s, ticks 1.5% per 15 frames, no KB. Re-poisoning
   refreshes (doesn't stack). Clears on death.
 - **Ledge grab** — auto-grab when falling near either stage corner. 40 frames invuln.

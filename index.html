@@ -186,9 +186,20 @@
       jumpPower: 10,      // lower initial jump but 5 air jumps
       weight: 0.75,       // very light — dies to strong hits earlier
       description: 'Fast floaty flier. Five jumps and huge air mobility.',
+    },
+    theo: {
+      name: 'Theo',
+      color: '#8a4ade',
+      color2: '#4ad7e8',
+      archetype: 'Controller',
+      walkSpeed: 3.3,
+      dashSpeed: 5.2,
+      jumpPower: 12.5,
+      weight: 1.0,
+      description: 'Dark-energy controller. Absorb, blast, teleport, charge bomb.',
     }
   };
-  const CHAR_KEYS = ['nico', 'derek', 'rhys', 'greyson', 'kele', 'jonah'];
+  const CHAR_KEYS = ['nico', 'derek', 'rhys', 'greyson', 'kele', 'jonah', 'theo'];
 
   // ---------- CONTROL MAPS ----------
   const controls = [
@@ -380,7 +391,8 @@
       else if (this.key === 'rhys') this.rhysSpecial(dir);
       else if (this.key === 'greyson') this.greysonSpecial(dir);
       else if (this.key === 'kele') this.keleSpecial(dir);
-      else this.jonahSpecial(dir);
+      else if (this.key === 'jonah') this.jonahSpecial(dir);
+      else this.theoSpecial(dir);
     }
 
     startAttack(dir) {
@@ -699,6 +711,57 @@
       }
     }
 
+    // --- THEO SPECIALS ---
+    theoSpecial(dir) {
+      if (dir === 'neutral') {
+        // Charge Bomb — hold special to charge, release (or auto-release at cap) to detonate.
+        // Damage and radius scale with charge held.
+        this.moveState = { type: 'chargeBomb', timer: 240, charge: 0, released: false };
+        if (this.onGround) this.vx = 0;
+      } else if (dir === 'up') {
+        // Teleport — vanishes for a brief window then reappears in the directional key pressed.
+        // Reads currently-held directional keys to compute the teleport vector.
+        const ctrl = controls[this.index];
+        let dxd = 0, dyd = 0;
+        if (keys[ctrl.left]) dxd -= 1;
+        if (keys[ctrl.right]) dxd += 1;
+        if (keys[ctrl.up]) dyd -= 1;
+        if (keys[ctrl.down]) dyd += 1;
+        // Default to straight up if only the up key was held to trigger the special
+        if (dxd === 0 && dyd === 0) dyd = -1;
+        const mag = Math.hypot(dxd, dyd) || 1;
+        const dist = 200;
+        this.moveState = {
+          type: 'teleport', timer: 24, phase: 'pre',
+          dx: (dxd / mag) * dist, dy: (dyd / mag) * dist,
+        };
+        this.vx = 0; this.vy = 0;
+        this.invuln = 20;
+        spawnEffect(this.cx, this.cy, '#8a4ade', 22, 32);
+        spawnEffect(this.cx, this.cy, '#4ad7e8', 18, 26);
+      } else if (dir === 'side') {
+        // Power Blast — energy rifle shot with an attached bayonet.
+        // The bayonet is a close-range melee hitbox; the laser projectile flies forward.
+        // At close range, both connect → full damage.
+        this.moveState = { type: 'powerBlast', timer: 28, active: [6, 14], hasHit: null };
+        this.vx = this.facing * 1.5;
+        setTimeout(() => {
+          projectiles.push({
+            owner: this, x: this.cx + this.facing * 28, y: this.cy - 2,
+            vx: this.facing * 14, vy: 0, w: 28, h: 6,
+            life: 38, damage: 7, kbx: this.facing * 4, kby: -2,
+            type: 'laser', gravity: 0,
+          });
+          spawnEffect(this.cx + this.facing * 30, this.cy - 2, '#4ad7e8', 14, 18);
+        }, 100);
+      } else if (dir === 'down') {
+        // Absorb — pulls in nearby enemy projectiles and converts them into healing.
+        this.moveState = { type: 'absorb', timer: 32, absorbed: 0 };
+        this.invuln = 6;
+        if (this.onGround) this.vx = 0;
+      }
+    }
+
     update() {
       if (this.respawnTimer > 0) {
         this.respawnTimer--;
@@ -722,6 +785,7 @@
             'megaJump',    // Greyson up-special
             'uppercut',    // Kele up-special
             'glide',       // Jonah up-special (recovery)
+            'teleport',    // Theo up-special
           ]);
           if (propelMoves.has(this.moveState.type) && !this.onGround) {
             this.helpless = true;
@@ -741,6 +805,7 @@
             megaJump: 12,
             glide: 10,
             uppercut: 10,
+            teleport: 10,
           };
           const lag = endlagMap[this.moveState.type];
           if (lag) {
@@ -920,6 +985,73 @@
         // Rhys: Poison Lob windup
         if (this.moveState && this.moveState.type === 'poisonLob' && this.moveState.timer > 12) {
           if (Math.random() < 0.4) spawnEffect(this.cx, this.y - 6, '#b6ff6a', 10, 6);
+        }
+        // Theo: Charge Bomb — accumulate charge while special held, detonate on release or auto-cap.
+        if (this.moveState && this.moveState.type === 'chargeBomb') {
+          const ctrl = controls[this.index];
+          if (this.onGround) this.vx *= 0.4;
+          const m = this.moveState;
+          if (!m.released) {
+            const stillHeld = keys[ctrl.special];
+            if (stillHeld && m.charge < 90) {
+              m.charge++;
+              if (Math.random() < 0.4) {
+                const r = 14 + (m.charge / 90) * 22;
+                const ang = Math.random() * Math.PI * 2;
+                spawnEffect(this.cx + Math.cos(ang) * r, this.cy + Math.sin(ang) * r,
+                            m.charge > 60 ? '#4ad7e8' : '#8a4ade', 10, 6);
+              }
+            } else {
+              // Released (or charge maxed at 90) — detonate
+              m.released = true;
+              detonateChargeBomb(this, m.charge);
+              m.timer = Math.min(m.timer, 10);
+            }
+          }
+        }
+        // Theo: Teleport — vanish briefly, then jump to destination.
+        if (this.moveState && this.moveState.type === 'teleport') {
+          const m = this.moveState;
+          this.vx = 0; this.vy = 0;
+          if (m.phase === 'pre' && m.timer <= 16) {
+            // Reappear at destination
+            this.x += m.dx;
+            this.y += m.dy;
+            m.phase = 'post';
+            this.invuln = 14;
+            spawnEffect(this.cx, this.cy, '#4ad7e8', 22, 36);
+            spawnEffect(this.cx, this.cy, '#8a4ade', 18, 28);
+          }
+          if (Math.random() < 0.6) {
+            spawnEffect(this.cx + (Math.random()-0.5)*30, this.cy + (Math.random()-0.5)*40,
+                        '#8a4ade', 10, 8);
+          }
+        }
+        // Theo: Absorb — pull in projectiles in radius, convert to heal (reduce damage %).
+        if (this.moveState && this.moveState.type === 'absorb') {
+          if (this.onGround) this.vx *= 0.5;
+          const radius = 80;
+          for (let i = projectiles.length - 1; i >= 0; i--) {
+            const p = projectiles[i];
+            if (p.owner === this) continue;
+            // Skip persistent/area types — Absorb only consumes "shot" projectiles
+            if (p.type === 'smoke' || p.type === 'sporeTrap' || p.type === 'poisonCloud') continue;
+            const px = p.x + p.w/2, py = p.y + p.h/2;
+            if (Math.hypot(px - this.cx, py - this.cy) < radius) {
+              const heal = (p.damage || 3) * 1.2;
+              this.damage = Math.max(0, this.damage - heal);
+              this.moveState.absorbed += heal;
+              spawnEffect(px, py, '#4ad7e8', 18, 22);
+              spawnEffect(this.cx, this.cy, '#8a4ade', 16, 24);
+              projectiles.splice(i, 1);
+            }
+          }
+          if (Math.random() < 0.5) {
+            const ang = Math.random() * Math.PI * 2;
+            const r = 30 + Math.random() * 30;
+            spawnEffect(this.cx + Math.cos(ang) * r, this.cy + Math.sin(ang) * r,
+                        '#4ad7e8', 12, 8);
+          }
         }
       }
 
@@ -1192,6 +1324,15 @@
         return { x: this.facing === 1 ? this.x + this.w - 4 : this.x - 34,
                  y: this.y + 6, w: 38, h: this.h - 12,
                  damage: 0, kbx: 0, kby: 0, type: 'grab', grab: true, suplex: true };
+      }
+      // Theo: Power Blast — bayonet melee in front. Close-range thrust window only.
+      if (t === 'powerBlast') {
+        const elapsed = 28 - this.moveState.timer;
+        const [a, b] = this.moveState.active;
+        if (elapsed < a || elapsed > b) return null;
+        return { x: this.facing === 1 ? this.x + this.w - 2 : this.x - 38,
+                 y: this.y + 16, w: 40, h: 22,
+                 damage: 9, kbx: this.facing * 5, kby: -3, type: 'energy' };
       }
       // Jonah: Ultra Spike — body is a hitbox while plummeting (before bounce)
       if (t === 'ultraSpike' && !this.moveState.bounced) {
@@ -1670,6 +1811,147 @@
             }
           }
         }
+        // Theo: Charge Bomb — glowing orb in front that grows with charge
+        if (t === 'chargeBomb') {
+          const m = this.moveState;
+          const tFrac = Math.min(1, m.charge / 90);
+          const r = 6 + tFrac * 16;
+          const ox = this.cx + this.facing * 14;
+          const oy = this.cy - 2;
+          // Outer halo
+          ctx.fillStyle = `rgba(74, 215, 232, ${0.25 + tFrac * 0.3})`;
+          ctx.beginPath(); ctx.arc(ox, oy, r + 6, 0, Math.PI*2); ctx.fill();
+          // Purple core
+          ctx.fillStyle = '#8a4ade';
+          ctx.beginPath(); ctx.arc(ox, oy, r, 0, Math.PI*2); ctx.fill();
+          // Cyan inner
+          ctx.fillStyle = '#4ad7e8';
+          ctx.beginPath(); ctx.arc(ox, oy, r * 0.6, 0, Math.PI*2); ctx.fill();
+          // White-hot center at high charge
+          if (tFrac > 0.5) {
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(ox, oy, r * 0.3 * (tFrac - 0.5) * 2, 0, Math.PI*2);
+            ctx.fill();
+          }
+          // Charge meter above head
+          const barW = 28;
+          ctx.fillStyle = 'rgba(0,0,0,0.5)';
+          ctx.fillRect(this.cx - barW/2, this.y - 14, barW, 4);
+          ctx.fillStyle = tFrac > 0.85 ? '#ffffff' : (tFrac > 0.5 ? '#4ad7e8' : '#8a4ade');
+          ctx.fillRect(this.cx - barW/2, this.y - 14, barW * tFrac, 4);
+          // Crackle lines when fully charged
+          if (tFrac >= 1) {
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 1.5;
+            for (let k = 0; k < 4; k++) {
+              const ang = Math.random() * Math.PI * 2;
+              ctx.beginPath();
+              ctx.moveTo(ox, oy);
+              ctx.lineTo(ox + Math.cos(ang) * (r + 8), oy + Math.sin(ang) * (r + 8));
+              ctx.stroke();
+            }
+          }
+        }
+        // Theo: Power Blast — rifle barrel + bayonet thrust
+        if (t === 'powerBlast') {
+          const hb = this.getHitbox();
+          // Rifle body, drawn whether or not the bayonet is active
+          const muzzleX = this.cx + this.facing * 22;
+          const muzzleY = this.cy - 2;
+          ctx.fillStyle = '#3a2a4a';
+          ctx.fillRect(this.cx - this.facing * 4, muzzleY - 3, this.facing * 26, 6);
+          // Bayonet blade — sharp triangle
+          ctx.fillStyle = '#cfd8e8';
+          ctx.beginPath();
+          ctx.moveTo(muzzleX, muzzleY - 4);
+          ctx.lineTo(muzzleX + this.facing * 18, muzzleY);
+          ctx.lineTo(muzzleX, muzzleY + 4);
+          ctx.closePath();
+          ctx.fill();
+          ctx.strokeStyle = '#8a4ade';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          if (hb) {
+            // Active thrust: cyan beam-burst from muzzle + impact box
+            ctx.fillStyle = 'rgba(74, 215, 232, 0.45)';
+            ctx.fillRect(hb.x, hb.y, hb.w, hb.h);
+            ctx.strokeStyle = '#4ad7e8';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
+            // Muzzle flash
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(muzzleX, muzzleY, 5, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#4ad7e8';
+            ctx.beginPath();
+            ctx.arc(muzzleX, muzzleY, 8, 0, Math.PI*2);
+            ctx.fill();
+          }
+        }
+        // Theo: Teleport — vanish/appear ripples
+        if (t === 'teleport') {
+          const m = this.moveState;
+          const phaseProgress = (24 - m.timer) / 24;
+          const ringR = 18 + phaseProgress * 30;
+          ctx.strokeStyle = `rgba(138, 74, 222, ${1 - phaseProgress})`;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(this.cx, this.cy, ringR, 0, Math.PI*2);
+          ctx.stroke();
+          ctx.strokeStyle = `rgba(74, 215, 232, ${0.7 - phaseProgress * 0.5})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(this.cx, this.cy, ringR * 0.7, 0, Math.PI*2);
+          ctx.stroke();
+          // Direction streak
+          if (m.phase === 'pre') {
+            const ang = Math.atan2(m.dy, m.dx);
+            ctx.strokeStyle = '#4ad7e8';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.cy);
+            ctx.lineTo(this.cx + Math.cos(ang) * 22, this.cy + Math.sin(ang) * 22);
+            ctx.stroke();
+          }
+        }
+        // Theo: Absorb — swirling vortex around Theo
+        if (t === 'absorb') {
+          const m = this.moveState;
+          const tt = Date.now() * 0.012;
+          // Concentric pull rings
+          for (let k = 0; k < 3; k++) {
+            const r = 70 - k * 18 - (tt + k) % 1 * 12;
+            ctx.strokeStyle = `rgba(74, 215, 232, ${0.4 - k * 0.1})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(this.cx, this.cy, r, 0, Math.PI*2);
+            ctx.stroke();
+          }
+          // Spinning particles
+          for (let k = 0; k < 6; k++) {
+            const ang = tt + k * (Math.PI * 2 / 6);
+            const r = 50 + Math.sin(tt * 2 + k) * 8;
+            ctx.fillStyle = '#8a4ade';
+            ctx.beginPath();
+            ctx.arc(this.cx + Math.cos(ang) * r, this.cy + Math.sin(ang) * r, 3, 0, Math.PI*2);
+            ctx.fill();
+          }
+          // Center glow
+          ctx.fillStyle = 'rgba(74, 215, 232, 0.4)';
+          ctx.beginPath();
+          ctx.arc(this.cx, this.cy, 14, 0, Math.PI*2);
+          ctx.fill();
+          // Heal readout if anything has been absorbed
+          if (m.absorbed > 0) {
+            ctx.fillStyle = '#4ad7e8';
+            ctx.font = 'bold 11px sans-serif';
+            ctx.textAlign = 'center';
+            ctx.fillText(`+${Math.floor(m.absorbed)}`, this.cx, this.y - 18);
+            ctx.textAlign = 'left';
+          }
+        }
         // Kele: Suplex — reaching grab, then overhead hold indicator
         if (t === 'suplex') {
           if (this.moveState.grabbed) {
@@ -1764,6 +2046,37 @@
       }
       // Grenades can also friendly-fire Greyson himself (part of the risk)
       f.takeDamage(dmg, kbx, kby, p.owner);
+    }
+  }
+
+  // Theo's Charge Bomb detonation. Damage and radius scale with charge held.
+  function detonateChargeBomb(owner, charge) {
+    const cx = owner.cx, cy = owner.cy;
+    const t = Math.max(0, Math.min(1, charge / 90));
+    const dmg = 7 + t * 18;          // 7 → 25
+    const radius = 55 + t * 65;       // 55 → 120
+    spawnEffect(cx, cy, '#ffffff', 26, radius * 0.6);
+    spawnEffect(cx, cy, '#4ad7e8', 30, radius);
+    spawnEffect(cx, cy, '#8a4ade', 26, radius * 1.1);
+    for (const f of fighters) {
+      if (f === owner) continue;
+      if (f.respawnTimer > 0 || f.invuln > 0) continue;
+      const dx = f.cx - cx, dy = f.cy - cy;
+      const dist = Math.hypot(dx, dy);
+      if (dist > radius) continue;
+      const fall = 1 - (dist / radius) * 0.5;
+      const fdmg = dmg * fall;
+      const dir = dist < 1 ? 1 : 1 / dist;
+      const kbx = dx * dir * (5 + t * 3);
+      const kby = Math.min(-3, (dy - 24) * dir * (5 + t * 3));
+      if (f.counterActive > 0) {
+        owner.takeDamage(fdmg * 1.5, -kbx * 1.3, -5, f);
+        spawnEffect(f.cx, f.cy, '#ffffff', 20, 36);
+        f.counterActive = 0;
+        f.counterCooldown = 60;
+        continue;
+      }
+      f.takeDamage(fdmg, kbx, kby, owner);
     }
   }
 
@@ -2010,7 +2323,7 @@
           if (atk.moveState && atk.moveState.type && atk.moveState.type.startsWith('atk_')) {
             atk.moveState.hasHit = atk.moveState.hasHit || new Set();
             atk.moveState.hasHit.add(def);
-          } else if (atk.moveState && ['toxHeadbutt','toxPunch','hardPunch','powerPunch','uppercut','bodySlam','ultraSpike'].includes(atk.moveState.type)) {
+          } else if (atk.moveState && ['toxHeadbutt','toxPunch','hardPunch','powerPunch','uppercut','bodySlam','ultraSpike','powerBlast'].includes(atk.moveState.type)) {
             atk.moveState.hasHit = atk.moveState.hasHit || new Set();
             atk.moveState.hasHit.add(def);
           } else {
@@ -2263,6 +2576,20 @@
                   10 + Math.sin(p.tick * 0.15 + i) * 3, 0, Math.PI*2);
           ctx.fill();
         }
+      } else if (p.type === 'laser') {
+        // Energy beam — cyan outer halo, purple core, white-hot center
+        ctx.fillStyle = 'rgba(74, 215, 232, 0.35)';
+        ctx.fillRect(p.x - 4, p.y - 4, p.w + 8, p.h + 8);
+        ctx.fillStyle = 'rgba(138, 74, 222, 0.7)';
+        ctx.fillRect(p.x - 1, p.y - 1, p.w + 2, p.h + 2);
+        ctx.fillStyle = '#4ad7e8';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(p.x + 2, p.y + 1, p.w - 4, p.h - 2);
+        // Streak tail
+        const tailX = p.vx > 0 ? p.x - 6 : p.x + p.w;
+        ctx.fillStyle = 'rgba(74, 215, 232, 0.4)';
+        ctx.fillRect(tailX, p.y + 1, 6, p.h - 2);
       } else if (p.type === 'sporeTrap') {
         if (p.triggered) {
           // Burst puff
@@ -2407,7 +2734,8 @@
     // Dynamic card layout for any roster size
     const N = CHAR_KEYS.length;
     let cardW, cardH, gap;
-    if (N >= 6) { cardW = 130; cardH = 200; gap = 10; }
+    if (N >= 7) { cardW = 118; cardH = 190; gap = 8; }
+    else if (N >= 6) { cardW = 130; cardH = 200; gap = 10; }
     else if (N >= 5) { cardW = 150; cardH = 220; gap = 14; }
     else if (N >= 4) { cardW = 180; cardH = 240; gap = 20; }
     else { cardW = 200; cardH = 240; gap = 30; }
@@ -2506,13 +2834,15 @@
       'Greyson (Hybrid):      neutral→Grenade      side→Hard Punch   up→Mega Jump    down→Cmd Grab  · grab pierces shield',
       'Kele    (Heavyweight): neutral→Power Punch  side→Suplex       up→Uppercut     down→Body Slam · slow, huge damage',
       'Jonah   (Flier):       neutral→Beet Blast   side→Mach 5       up→Glide        down→Ultra Spike · 5 jumps, floaty',
+      'Theo    (Controller):  neutral→Charge Bomb  side→Power Blast  up→Teleport     down→Absorb · absorb heals from projectiles',
     ];
-    ctx.fillText(hints[0], 30, H - 175);
-    ctx.fillText(hints[1], 30, H - 160);
-    ctx.fillText(hints[2], 30, H - 145);
-    ctx.fillText(hints[3], 30, H - 130);
-    ctx.fillText(hints[4], 30, H - 115);
-    ctx.fillText(hints[5], 30, H - 100);
+    ctx.fillText(hints[0], 30, H - 190);
+    ctx.fillText(hints[1], 30, H - 175);
+    ctx.fillText(hints[2], 30, H - 160);
+    ctx.fillText(hints[3], 30, H - 145);
+    ctx.fillText(hints[4], 30, H - 130);
+    ctx.fillText(hints[5], 30, H - 115);
+    ctx.fillText(hints[6], 30, H - 100);
     ctx.textAlign = 'left';
   }
 
