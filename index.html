@@ -1,0 +1,2592 @@
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { background: #0a0a12; color: #eee; font-family: system-ui, sans-serif; overflow: hidden; }
+  #wrap { display: flex; flex-direction: column; align-items: center; justify-content: center; min-height: 100vh; padding: 12px; }
+  canvas { background: #1a1a28; border: 2px solid #3a3a55; border-radius: 8px; display: block; max-width: 100%; height: auto; }
+  #hud { font-size: 12px; color: #999; margin-top: 10px; text-align: center; max-width: 960px; line-height: 1.6; }
+  .key { display: inline-block; background: #2a2a3a; padding: 2px 6px; border-radius: 3px; color: #fff; font-family: monospace; font-size: 11px; }
+  h1 { font-size: 20px; margin-bottom: 8px; letter-spacing: 2px; color: #ff6a2a; }
+  h1 span { color: #4ab8ff; }
+</style>
+
+<div id="wrap">
+  <h1>ALPHA <span>BRAWL</span></h1>
+  <canvas id="game" width="960" height="540"></canvas>
+  <div id="hud">
+    <b style="color:#ff6a2a">P1 (Nico / Derek)</b>: <span class="key">WASD</span> move/jump &nbsp; <span class="key">L-Shift</span> block &nbsp; <span class="key">R</span> attack (+direction for tilts/aerials) &nbsp; <span class="key">F</span> special (+direction)<br>
+    <b style="color:#4ab8ff">P2 (Nico / Derek)</b>: <span class="key">Arrows</span> move/jump &nbsp; <span class="key">R-Shift</span> block &nbsp; <span class="key">K</span> attack (+direction) &nbsp; <span class="key">L</span> special (+direction)<br>
+    Character select on title screen. Press <span class="key">Enter</span> to start / restart. First to knock the other off 3 times wins.
+  </div>
+</div>
+
+<script>
+(() => {
+  const cvs = document.getElementById('game');
+  const ctx = cvs.getContext('2d');
+  const W = cvs.width, H = cvs.height;
+
+  // ---------- INPUT ----------
+  const keys = {};
+  window.addEventListener('keydown', e => {
+    keys[e.code] = true;
+    if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+  });
+  window.addEventListener('keyup', e => { keys[e.code] = false; });
+
+  // ---------- GAME STATE ----------
+  const STATE = { MENU: 0, PLAY: 1, OVER: 2 };
+  let state = STATE.MENU;
+  let menuSel = [0, 1]; // p1 picks Nico, p2 picks Derek by default
+  let menuConfirm = [false, false];
+  let menuCursor = 0; // which player is currently selecting
+  let winner = null;
+
+  // ---------- STAGE ----------
+  // World coordinates are much bigger than the viewport so fighters can go offstage.
+  // The main platform is centered in the world; everything outside is a blastzone.
+  const WORLD_W = 1800;
+  const WORLD_H = 1200;
+  const STAGE_LEFT = 400;     // main platform left edge
+  const STAGE_RIGHT = 1400;   // main platform right edge
+  const STAGE_TOP = 700;      // main platform top surface
+  const GROUND_Y = STAGE_TOP;
+  // Blastzones: crossing any of these kills the fighter
+  const BLAST_LEFT = 100;
+  const BLAST_RIGHT = WORLD_W - 100;
+  const BLAST_TOP = 100;
+  const BLAST_BOTTOM = WORLD_H - 80;
+
+  const platforms = [
+    // main stage — solid block in the middle of the world
+    { x: STAGE_LEFT, y: STAGE_TOP, w: STAGE_RIGHT - STAGE_LEFT, h: 80, solid: true, main: true },
+    // floating platforms above the stage
+    { x: STAGE_LEFT + 140, y: STAGE_TOP - 120, w: 160, h: 12, solid: true },
+    { x: STAGE_RIGHT - 300, y: STAGE_TOP - 120, w: 160, h: 12, solid: true },
+    { x: (STAGE_LEFT + STAGE_RIGHT)/2 - 80, y: STAGE_TOP - 220, w: 160, h: 12, solid: true },
+  ];
+
+  // Ledges: grabbable corners of the main stage, for recoveries
+  const LEDGE_LEFT = { x: STAGE_LEFT, y: STAGE_TOP, side: -1 };   // -1 = left ledge (faces right)
+  const LEDGE_RIGHT = { x: STAGE_RIGHT, y: STAGE_TOP, side: 1 }; // 1 = right ledge (faces left)
+  const LEDGES = [LEDGE_LEFT, LEDGE_RIGHT];
+
+  // ---------- CAMERA ----------
+  const camera = {
+    x: WORLD_W / 2, y: STAGE_TOP - 100,  // world-space center the viewport is looking at
+    zoom: 1.0,
+    targetX: WORLD_W / 2, targetY: STAGE_TOP - 100,
+    targetZoom: 1.0,
+  };
+  function updateCamera() {
+    if (fighters.length < 2) return;
+    // Midpoint of the two fighters
+    const cx = (fighters[0].cx + fighters[1].cx) / 2;
+    const cy = (fighters[0].cy + fighters[1].cy) / 2;
+    // Zoom based on distance between fighters — pull back if they're far apart
+    const dx = Math.abs(fighters[0].cx - fighters[1].cx);
+    const dy = Math.abs(fighters[0].cy - fighters[1].cy);
+    // Keep both fighters on screen with some margin
+    const marginX = 280, marginY = 200;
+    const zx = W / (dx + marginX * 2);
+    const zy = H / (dy + marginY * 2);
+    const fitZoom = Math.min(zx, zy);
+    // Clamp zoom: don't zoom in past 1.1× (keeps fighters visible when close), don't zoom out past 0.5× (readable)
+    camera.targetZoom = Math.max(0.5, Math.min(1.1, fitZoom));
+    camera.targetX = cx;
+    camera.targetY = cy;
+    // Clamp target so we don't look past the blastzones
+    const viewHalfW = (W / 2) / camera.targetZoom;
+    const viewHalfH = (H / 2) / camera.targetZoom;
+    camera.targetX = Math.max(BLAST_LEFT - 80 + viewHalfW, Math.min(BLAST_RIGHT + 80 - viewHalfW, camera.targetX));
+    camera.targetY = Math.max(BLAST_TOP - 80 + viewHalfH, Math.min(BLAST_BOTTOM + 80 - viewHalfH, camera.targetY));
+    // Smooth interpolation
+    camera.x += (camera.targetX - camera.x) * 0.12;
+    camera.y += (camera.targetY - camera.y) * 0.12;
+    camera.zoom += (camera.targetZoom - camera.zoom) * 0.08;
+  }
+  // Apply camera transform before drawing world content
+  function applyCamera() {
+    ctx.save();
+    ctx.translate(W/2, H/2);
+    ctx.scale(camera.zoom, camera.zoom);
+    ctx.translate(-camera.x, -camera.y);
+  }
+  function releaseCamera() {
+    ctx.restore();
+  }
+
+  // ---------- HELPERS ----------
+  const rectsOverlap = (a, b) =>
+    a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+  // ---------- CHARACTER DEFINITIONS ----------
+  const CHARS = {
+    nico: {
+      name: 'Nico',
+      color: '#ff6a2a',
+      color2: '#ffd24a',
+      archetype: 'Rushdown',
+      walkSpeed: 3.6,
+      dashSpeed: 5.8,
+      jumpPower: 13,
+      weight: 0.95,
+      description: 'Flame rushdown. Close-range pressure with fire.',
+    },
+    derek: {
+      name: 'Derek',
+      color: '#4ab8ff',
+      color2: '#b088ff',
+      archetype: 'Zoner',
+      walkSpeed: 3.2,
+      dashSpeed: 5.2,
+      jumpPower: 12.5,
+      weight: 1.0,
+      description: 'Shadow zoner. Keep-away with ranged tools.',
+    },
+    rhys: {
+      name: 'Rhys',
+      color: '#5aaf3a',
+      color2: '#b6ff6a',
+      archetype: 'Trapper',
+      walkSpeed: 3.0,
+      dashSpeed: 4.8,
+      jumpPower: 12,
+      weight: 1.1,
+      description: 'Poison trapper. Low damage, stacks poison DoT.',
+    },
+    greyson: {
+      name: 'Greyson',
+      color: '#6a7a4a',
+      color2: '#d4c77a',
+      archetype: 'Hybrid',
+      walkSpeed: 3.3,
+      dashSpeed: 5.3,
+      jumpPower: 12.5,
+      weight: 1.05,
+      description: 'Military hybrid. Bombs, punches, shield-break throw.',
+    },
+    kele: {
+      name: 'Kele',
+      color: '#a34040',
+      color2: '#f0d050',
+      archetype: 'Heavyweight',
+      walkSpeed: 2.6,
+      dashSpeed: 4.0,
+      jumpPower: 11,
+      weight: 1.35,
+      description: 'Slow bruiser. Crushing melee, no ranged tools.',
+    },
+    jonah: {
+      name: 'Jonah',
+      color: '#e070b0',
+      color2: '#a0e0d0',
+      archetype: 'Flier',
+      walkSpeed: 4.0,
+      dashSpeed: 6.2,
+      jumpPower: 10,      // lower initial jump but 5 air jumps
+      weight: 0.75,       // very light — dies to strong hits earlier
+      description: 'Fast floaty flier. Five jumps and huge air mobility.',
+    }
+  };
+  const CHAR_KEYS = ['nico', 'derek', 'rhys', 'greyson', 'kele', 'jonah'];
+
+  // ---------- CONTROL MAPS ----------
+  const controls = [
+    { left:'KeyA', right:'KeyD', up:'KeyW', down:'KeyS', block:'ShiftLeft', special:'KeyF', attack:'KeyR' },
+    { left:'ArrowLeft', right:'ArrowRight', up:'ArrowUp', down:'ArrowDown', block:'ShiftRight', special:'KeyL', attack:'KeyK' },
+  ];
+
+  // ---------- PROJECTILES & EFFECTS ----------
+  const projectiles = [];
+  const effects = [];
+
+  function spawnEffect(x, y, color, life = 20, radius = 14) {
+    effects.push({ x, y, color, life, maxLife: life, radius });
+  }
+
+  // ---------- PLAYER CLASS ----------
+  class Fighter {
+    constructor(charKey, x, facing, index) {
+      const c = CHARS[charKey];
+      this.key = charKey;
+      this.def = c;
+      this.index = index;
+      this.x = x; this.y = 300;
+      this.vx = 0; this.vy = 0;
+      this.w = 36; this.h = 60;
+      this.facing = facing; // 1 right, -1 left
+      this.onGround = false;
+      this.jumps = 0;
+      this.maxJumps = (charKey === 'jonah') ? 5 : 2;
+
+      this.damage = 0; // SSB-style percent
+      this.stocks = 3;
+      this.hitstun = 0;
+      this.knockback = { x: 0, y: 0 };
+      this.blocking = false;
+      this.blockCooldown = 0;
+      this.poisonTimer = 0;  // frames of poison remaining
+      this.poisonTick = 0;   // counter for DoT cadence
+
+      // inputs
+      this.prevSpecial = false;
+      this.prevBlock = false;
+      this.prevAttack = false;
+
+      // move state
+      this.moveState = null; // { type, timer, ... }
+      this.attackCooldown = 0;
+      this.invuln = 0;
+      this.counterActive = 0; // frames where down-special counters
+      this.counterCooldown = 0;
+      this.endlag = 0;        // recovery frames after a committed move — locks inputs
+
+      // air drift
+      this.canFastFall = true;
+
+      // respawn
+      this.respawnTimer = 0;
+
+      // visual
+      this.squash = 1;
+      this.burnTimer = 0; // fire trail effect
+
+      // Helpless / free-fall state: after committing to a recovery-type special,
+      // the fighter can't special or attack until they land. Also can't jump again.
+      this.helpless = false;
+
+      // Ledge grab state: when non-null, fighter is hanging on a ledge with invuln frames
+      this.ledgeGrab = null;        // reference to a LEDGE object
+      this.ledgeGrabTimer = 0;      // frames spent hanging (gives brief invuln)
+      this.ledgeCooldown = 0;       // prevent re-grabbing the same ledge instantly
+    }
+
+    get cx() { return this.x + this.w / 2; }
+    get cy() { return this.y + this.h / 2; }
+
+    applyPoison(frames = 90) {
+      // 1.5 seconds at 60fps = 90 frames. Refresh (not stack) so re-poisoning resets duration.
+      this.poisonTimer = Math.max(this.poisonTimer, frames);
+    }
+
+    takeDamage(amount, kbx, kby, attacker) {
+      if (this.invuln > 0) return false;
+      // Block reduces damage and knockback, but shield doesn't fully cover
+      if (this.blocking) {
+        this.damage += amount * 0.2;
+        this.knockback.x = kbx * 0.3;
+        this.knockback.y = kby * 0.3;
+        this.hitstun = 8;
+        spawnEffect(this.cx, this.cy, '#88ddff', 16, 20);
+        return true;
+      }
+      this.damage += amount;
+      // knockback scales with damage (SSB-style)
+      const scale = 1 + this.damage / 60;
+      this.knockback.x = kbx * scale / this.def.weight;
+      this.knockback.y = kby * scale / this.def.weight;
+      this.vx = this.knockback.x;
+      this.vy = this.knockback.y;
+      this.hitstun = Math.min(45, 12 + this.damage * 0.2);
+      // Getting hit breaks helpless state and endlag
+      this.helpless = false;
+      this.endlag = 0;
+      spawnEffect(this.cx, this.cy, '#ffeb3b', 24, 28);
+      return true;
+    }
+
+    handleInput() {
+      if (this.hitstun > 0 || this.respawnTimer > 0 || this.endlag > 0) return;
+      const ctrl = controls[this.index];
+      const left = keys[ctrl.left];
+      const right = keys[ctrl.right];
+      const up = keys[ctrl.up];
+      const down = keys[ctrl.down];
+      const block = keys[ctrl.block];
+      const special = keys[ctrl.special];
+      const attack = keys[ctrl.attack];
+
+      // Block
+      if (block && this.onGround && this.blockCooldown <= 0 && !this.moveState && !this.helpless) {
+        this.blocking = true;
+      } else {
+        this.blocking = false;
+      }
+      if (this.blocking) this.blockCooldown = 0; // no drain for simplicity
+
+      // Movement (locked during moves)
+      if (!this.moveState && !this.blocking) {
+        // While helpless: allow slow air drift only, no jumps, no fast-fall
+        if (this.helpless) {
+          const drift = this.def.walkSpeed * 0.5;
+          if (left && !right) { this.vx = Math.max(this.vx - 0.3, -drift); this.facing = -1; }
+          else if (right && !left) { this.vx = Math.min(this.vx + 0.3, drift); this.facing = 1; }
+        } else {
+          if (left && !right) { this.vx = -this.def.walkSpeed; this.facing = -1; }
+          else if (right && !left) { this.vx = this.def.walkSpeed; this.facing = 1; }
+          else if (this.onGround) { this.vx *= 0.6; }
+
+          // Jump (edge detect)
+          if (up && !this.prevUp && this.jumps < this.maxJumps) {
+            this.vy = -this.def.jumpPower;
+            this.jumps++;
+            this.onGround = false;
+            spawnEffect(this.cx, this.y + this.h, '#ffffff', 10, 14);
+          }
+
+          // Fast fall
+          if (down && !this.onGround && this.vy > 0 && this.canFastFall) {
+            this.vy = Math.max(this.vy, 9);
+          }
+        }
+      }
+      this.prevUp = up;
+
+      // Special move trigger (edge detect) — blocked while helpless
+      if (special && !this.prevSpecial && !this.moveState && this.attackCooldown <= 0 && !this.blocking && !this.helpless) {
+        let dir = 'neutral';
+        if (up) dir = 'up';
+        else if (down) dir = 'down';
+        else if (left || right) dir = 'side';
+        this.startSpecial(dir);
+      }
+      this.prevSpecial = special;
+
+      // Regular attack trigger (edge detect) — blocked while helpless
+      if (attack && !this.prevAttack && !this.moveState && this.attackCooldown <= 0 && !this.blocking && !this.helpless) {
+        let dir = 'neutral';
+        if (!this.onGround) {
+          // Aerials: up/down/side/neutral air
+          if (up) dir = 'upair';
+          else if (down) dir = 'dair';
+          else if ((left && this.facing === -1) || (right && this.facing === 1)) dir = 'fair';
+          else if ((left && this.facing === 1) || (right && this.facing === -1)) dir = 'bair';
+          else dir = 'nair';
+        } else {
+          if (up) dir = 'uptilt';
+          else if (down) dir = 'downtilt';
+          else if (left || right) dir = 'sidetilt';
+          else dir = 'jab';
+        }
+        this.startAttack(dir);
+      }
+      this.prevAttack = attack;
+    }
+
+    startSpecial(dir) {
+      this.attackCooldown = 18;
+      if (this.key === 'nico') this.nicoSpecial(dir);
+      else if (this.key === 'derek') this.derekSpecial(dir);
+      else if (this.key === 'rhys') this.rhysSpecial(dir);
+      else if (this.key === 'greyson') this.greysonSpecial(dir);
+      else if (this.key === 'kele') this.keleSpecial(dir);
+      else this.jonahSpecial(dir);
+    }
+
+    startAttack(dir) {
+      // Regular attacks: faster than specials, lower damage, no projectiles.
+      // Variants keyed by direction. Attack state carries hitbox info used by getHitbox().
+      this.attackCooldown = 10;
+      const isNico = this.key === 'nico';
+      const flavor = isNico ? 'fire' : 'slash';
+
+      if (dir === 'jab') {
+        // quick punch/slash in front
+        this.moveState = { type: 'atk_jab', timer: 12, active: [3, 8],
+          dmg: 4, kbx: this.facing * 2.5, kby: -2, reach: 30, vertical: 0, flavor };
+      } else if (dir === 'sidetilt') {
+        // forward tilt — slight step, stronger
+        this.moveState = { type: 'atk_ftilt', timer: 18, active: [5, 12],
+          dmg: 7, kbx: this.facing * 4, kby: -2.5, reach: 38, vertical: 0, flavor };
+        this.vx = this.facing * 2;
+      } else if (dir === 'uptilt') {
+        // up tilt — launches upward
+        this.moveState = { type: 'atk_utilt', timer: 18, active: [4, 11],
+          dmg: 6, kbx: this.facing * 1, kby: -6, reach: 20, vertical: -1, flavor };
+      } else if (dir === 'downtilt') {
+        // down tilt — low, trip-style
+        this.moveState = { type: 'atk_dtilt', timer: 16, active: [4, 10],
+          dmg: 5, kbx: this.facing * 3, kby: -1.5, reach: 34, vertical: 1, flavor };
+      } else if (dir === 'nair') {
+        // neutral air — circular hit around body
+        this.moveState = { type: 'atk_nair', timer: 22, active: [3, 16],
+          dmg: 6, kbx: this.facing * 3, kby: -3, reach: 26, vertical: 0, around: true, flavor };
+      } else if (dir === 'fair') {
+        // forward air
+        this.moveState = { type: 'atk_fair', timer: 20, active: [5, 13],
+          dmg: 8, kbx: this.facing * 4.5, kby: -2, reach: 36, vertical: 0, flavor };
+      } else if (dir === 'bair') {
+        // back air — hits behind, stronger
+        this.moveState = { type: 'atk_bair', timer: 20, active: [5, 12],
+          dmg: 9, kbx: -this.facing * 5, kby: -2, reach: 36, vertical: 0, back: true, flavor };
+      } else if (dir === 'upair') {
+        // up air — juggle tool
+        this.moveState = { type: 'atk_uair', timer: 20, active: [4, 12],
+          dmg: 7, kbx: this.facing * 1, kby: -7, reach: 22, vertical: -1, flavor };
+      } else if (dir === 'dair') {
+        // down air — spike
+        this.moveState = { type: 'atk_dair', timer: 22, active: [6, 14],
+          dmg: 9, kbx: this.facing * 1.5, kby: 6, reach: 22, vertical: 1, spike: true, flavor };
+      }
+    }
+
+    // --- NICO SPECIALS ---
+    nicoSpecial(dir) {
+      if (dir === 'neutral') {
+        // Fireball
+        this.moveState = { type: 'fireball', timer: 22 };
+        setTimeout(() => {
+          projectiles.push({
+            owner: this, x: this.cx + this.facing * 30, y: this.cy - 4,
+            vx: this.facing * 8, vy: -1, w: 20, h: 16,
+            life: 70, damage: 9, kbx: this.facing * 4, kby: -3,
+            type: 'fireball', gravity: 0.15, wobble: 0
+          });
+        }, 120);
+      } else if (dir === 'up') {
+        // Fire propulsion (recovery + hit)
+        this.moveState = { type: 'fireUp', timer: 26 };
+        this.vy = -14;
+        this.vx = this.facing * 3;
+        this.jumps = Math.max(this.jumps, 1);
+      } else if (dir === 'side') {
+        // Burning dash
+        this.moveState = { type: 'burnDash', timer: 22 };
+        this.vx = this.facing * 11;
+        this.vy = -2;
+        this.invuln = 8;
+      } else if (dir === 'down') {
+        // Counter
+        this.moveState = { type: 'counter', timer: 28 };
+        this.counterActive = 20;
+      }
+    }
+
+    // --- DEREK SPECIALS ---
+    derekSpecial(dir) {
+      if (dir === 'neutral') {
+        // Shuriken
+        this.moveState = { type: 'shuriken', timer: 16 };
+        setTimeout(() => {
+          projectiles.push({
+            owner: this, x: this.cx + this.facing * 24, y: this.cy - 4,
+            vx: this.facing * 10, vy: 0, w: 14, h: 14,
+            life: 55, damage: 6, kbx: this.facing * 3, kby: -2,
+            type: 'shuriken', gravity: 0, spin: 0
+          });
+        }, 80);
+      } else if (dir === 'up') {
+        // Katana upward dash
+        this.moveState = { type: 'katanaUp', timer: 24 };
+        this.vy = -13;
+        this.vx = this.facing * 2;
+        this.jumps = Math.max(this.jumps, 1);
+        this.invuln = 6;
+      } else if (dir === 'side') {
+        // Hand crossbow
+        this.moveState = { type: 'crossbow', timer: 20 };
+        setTimeout(() => {
+          projectiles.push({
+            owner: this, x: this.cx + this.facing * 28, y: this.cy - 2,
+            vx: this.facing * 13, vy: 0, w: 22, h: 5,
+            life: 45, damage: 8, kbx: this.facing * 4.5, kby: -1.5,
+            type: 'bolt', gravity: 0.04
+          });
+        }, 100);
+      } else if (dir === 'down') {
+        // Smoke bomb — big AoE puff
+        this.moveState = { type: 'smoke', timer: 30 };
+        setTimeout(() => {
+          projectiles.push({
+            owner: this, x: this.cx - 40, y: this.cy - 30,
+            vx: 0, vy: 0, w: 80, h: 80,
+            life: 40, damage: 0.6, kbx: 0, kby: -1.2,
+            type: 'smoke', gravity: 0, persistent: true, tick: 0
+          });
+        }, 140);
+      }
+    }
+
+    // --- RHYS SPECIALS ---
+    rhysSpecial(dir) {
+      if (dir === 'neutral') {
+        // Toxic Headbutt — Luigi's Green Missile-style charging projectile-body
+        // Locks movement during a short windup then launches Rhys horizontally with a hitbox.
+        this.moveState = { type: 'toxHeadbutt', timer: 38, launched: false, hasHit: null };
+        // Brief windup: during frames 30..20 of timer Rhys is stationary; then launch.
+      } else if (dir === 'up') {
+        // Poison Lob — throws a poison bomb straight up that falls and splashes
+        this.moveState = { type: 'poisonLob', timer: 20 };
+        setTimeout(() => {
+          projectiles.push({
+            owner: this, x: this.cx - 8, y: this.y - 10,
+            vx: 0, vy: -10, w: 16, h: 16,
+            life: 140, damage: 5, kbx: 0, kby: -2,
+            type: 'poisonLob', gravity: 0.35, spin: 0, exploded: false
+          });
+        }, 120);
+      } else if (dir === 'side') {
+        // Toxic Punch — heaviest punch, knockback scales with current horizontal speed
+        // Requires Rhys to be moving to hit hardest. Short startup, short active window.
+        this.moveState = {
+          type: 'toxPunch', timer: 24, active: [6, 14],
+          // Snapshot speed at move start — that's the "momentum bonus" for the punch.
+          punchSpeed: Math.abs(this.vx),
+          hasHit: null,
+        };
+        // Preserve momentum; don't zero vx. Small forward boost on startup.
+        this.vx += this.facing * 1.5;
+      } else if (dir === 'down') {
+        // Spore Trap — sets a stationary trap on the ground below Rhys
+        this.moveState = { type: 'sporeTrap', timer: 24 };
+        setTimeout(() => {
+          // Find ground directly below
+          let trapY = GROUND_Y;
+          for (const p of platforms) {
+            if (!p.solid || p.main) continue;
+            if (this.cx > p.x && this.cx < p.x + p.w && this.cy < p.y) {
+              if (p.y < trapY && p.y > this.cy) trapY = p.y;
+            }
+          }
+          projectiles.push({
+            owner: this, x: this.cx - 16, y: trapY - 8,
+            vx: 0, vy: 0, w: 32, h: 8,
+            life: 360, damage: 4, kbx: 0, kby: -6,
+            type: 'sporeTrap', gravity: 0, armed: false, armTimer: 30,
+            triggered: false, puff: 0,
+          });
+        }, 100);
+      }
+    }
+
+    // --- GREYSON SPECIALS ---
+    greysonSpecial(dir) {
+      if (dir === 'neutral') {
+        // Grenade — lobbed arc projectile, explodes on impact or after fuse
+        this.moveState = { type: 'grenade', timer: 22 };
+        setTimeout(() => {
+          projectiles.push({
+            owner: this, x: this.cx + this.facing * 20, y: this.cy - 6,
+            vx: this.facing * 6, vy: -8, w: 14, h: 14,
+            life: 90, damage: 10, kbx: this.facing * 5, kby: -5,
+            type: 'grenade', gravity: 0.4, spin: 0, fuse: 60,
+          });
+        }, 110);
+      } else if (dir === 'up') {
+        // Mega Jump — huge vertical launch, grants an extra jump, short superarmor
+        this.moveState = { type: 'megaJump', timer: 28 };
+        this.vy = -19;
+        this.vx = this.facing * 2.5;
+        this.jumps = 1; // reset to allow a follow-up double jump
+        this.maxJumps = 2;
+        this.invuln = 10;
+        spawnEffect(this.cx, this.y + this.h, '#d4c77a', 26, 36);
+        spawnEffect(this.cx, this.y + this.h + 6, '#6a7a4a', 22, 30);
+      } else if (dir === 'side') {
+        // Hard Punch — single heavy blow, lots of endlag
+        this.moveState = {
+          type: 'hardPunch', timer: 30, active: [8, 16],
+          hasHit: null,
+        };
+        // Small step forward on startup
+        this.vx = this.facing * 2;
+      } else if (dir === 'down') {
+        // Command Grab — bypasses shield, high damage when it lands, whiff punishable
+        this.moveState = {
+          type: 'cmdGrab', timer: 30, active: [6, 14],
+          grabbed: null, throwTimer: 0,
+        };
+        // Tiny lunge
+        this.vx = this.facing * 1.5;
+      }
+    }
+
+    // --- KELE SPECIALS ---
+    keleSpecial(dir) {
+      if (dir === 'neutral') {
+        // Power Punch — heaviest single hit, biggest knockback in the game.
+        // Long startup, long endlag. Super-armor during the windup to punch through jabs.
+        this.moveState = {
+          type: 'powerPunch', timer: 36, active: [14, 22],
+          hasHit: null,
+        };
+        // Super-armor for the windup window
+        this.invuln = 14;
+        this.vx = this.facing * 1; // tiny step
+      } else if (dir === 'up') {
+        // Uppercut — vertical rising jump-punch. Launches Kele up + puts victim into free-fall.
+        // Propulsion move itself → Kele goes helpless after it ends (like other up-specials).
+        this.moveState = {
+          type: 'uppercut', timer: 28, active: [4, 18],
+          hasHit: null,
+        };
+        this.vy = -14;
+        this.vx = this.facing * 2.5;
+        this.jumps = Math.max(this.jumps, 1);
+        this.invuln = 6;
+      } else if (dir === 'side') {
+        // Suplex — Mii Brawler-style command grab. Pierces shields, huge damage
+        // when it lands, whiff punishable. Requires close range.
+        this.moveState = {
+          type: 'suplex', timer: 32, active: [6, 16],
+          grabbed: null, phase: 'reach', // reach → lift → slam
+          phaseTimer: 0,
+        };
+        this.vx = this.facing * 2;
+      } else if (dir === 'down') {
+        // Body Slam — dash downward fast; final impact frame deals heavy damage.
+        // In the air: immediate plunge. On the ground: a short leap up then slam down.
+        this.moveState = {
+          type: 'bodySlam', timer: 44, phase: 'launch',
+          hasHit: null,
+        };
+        if (this.onGround) {
+          // Jump up first so the slam has vertical space
+          this.vy = -11;
+          this.vx = this.facing * 2;
+        } else {
+          // Already in air: drive straight down
+          this.vy = 4; // will be clamped high in lock block
+          this.vx = this.facing * 2;
+        }
+      }
+    }
+
+    // --- JONAH SPECIALS ---
+    jonahSpecial(dir) {
+      if (dir === 'neutral') {
+        // Beet Blast — short-range shotgun firing 5 spread beet projectiles
+        this.moveState = { type: 'beetBlast', timer: 20 };
+        setTimeout(() => {
+          const cx = this.cx + this.facing * 18;
+          const cy = this.cy - 4;
+          // 5 pellets with spread angles
+          const spreadAngles = [-0.35, -0.18, 0, 0.18, 0.35];
+          for (const ang of spreadAngles) {
+            const speed = 9 + (Math.random() - 0.5) * 1.5;
+            projectiles.push({
+              owner: this,
+              x: cx, y: cy + ang * 20,
+              vx: this.facing * speed * Math.cos(ang),
+              vy: speed * Math.sin(ang),
+              w: 10, h: 10,
+              life: 14,              // very short range
+              damage: 3, kbx: this.facing * 2.5, kby: -1.5,
+              type: 'beet', gravity: 0.1, spin: Math.random() * Math.PI * 2,
+            });
+          }
+          spawnEffect(cx, cy, '#e070b0', 14, 20);
+        }, 80);
+      } else if (dir === 'up') {
+        // Glide — huge fall-speed reduction for a long window. Not a launch,
+        // but while active Jonah drifts slowly and can traverse huge distances.
+        this.moveState = { type: 'glide', timer: 60 };
+        this.vy = Math.min(this.vy, -3); // small pop up at the start
+        this.vx = this.facing * 4;       // forward momentum
+        // Grant one air jump back for mixup potential after the glide ends
+        this.jumps = Math.max(this.jumps - 1, 0);
+      } else if (dir === 'side') {
+        // Mach 5 — long horizontal dash with huge range. No damage, just movement.
+        // Grants brief invuln during the dash so you can power through projectiles.
+        this.moveState = { type: 'mach5', timer: 18 };
+        this.invuln = 12;
+      } else if (dir === 'down') {
+        // Ultra Spike — drive straight down fast. On impact with a surface:
+        // Jonah bounces off! Also hits opponents on the way down.
+        this.moveState = { type: 'ultraSpike', timer: 40, bounced: false };
+        this.vy = 4;
+        this.vx = 0;
+      }
+    }
+
+    update() {
+      if (this.respawnTimer > 0) {
+        this.respawnTimer--;
+        if (this.respawnTimer === 0) this.respawn();
+        return;
+      }
+
+      this.handleInput();
+
+      // move timer
+      if (this.moveState) {
+        this.moveState.timer--;
+        if (this.moveState.timer <= 0) {
+          // If this move is a propulsion/recovery move and it ends while airborne,
+          // enter free-fall / helpless state until the fighter lands.
+          const propelMoves = new Set([
+            'fireUp',      // Nico up-special (fire propulsion)
+            'burnDash',    // Nico side-special (burning dash)
+            'katanaUp',    // Derek up-special (katana dash)
+            'toxHeadbutt', // Rhys neutral-special (horizontal launch)
+            'megaJump',    // Greyson up-special
+            'uppercut',    // Kele up-special
+            'glide',       // Jonah up-special (recovery)
+          ]);
+          if (propelMoves.has(this.moveState.type) && !this.onGround) {
+            this.helpless = true;
+          }
+          // END LAG — recovery frames where the fighter can't move or act.
+          // Heavier on high-commit dashes (Mach 5, Burn Dash, Toxic Headbutt).
+          // Lighter on recovery moves so they don't kill off-stage survivability.
+          // Only apply end lag if the move wasn't broken early by a counter, hit, etc.
+          const endlagMap = {
+            // Big commitment dashes — punishable on whiff
+            mach5: 22,         // Jonah — pure mobility, needs the biggest punishment window
+            burnDash: 20,      // Nico — KO tool, should commit you
+            toxHeadbutt: 18,   // Rhys — long horizontal commit
+            // Recovery-primary specials — smaller endlag so you can act soon after landing
+            katanaUp: 12,
+            fireUp: 12,
+            megaJump: 12,
+            glide: 10,
+            uppercut: 10,
+          };
+          const lag = endlagMap[this.moveState.type];
+          if (lag) {
+            // Only apply endlag on the ground; in-air fighters already get helpless which serves the same purpose
+            if (this.onGround) this.endlag = lag;
+          }
+          this.moveState = null;
+        }
+      }
+      if (this.attackCooldown > 0) this.attackCooldown--;
+      if (this.invuln > 0) this.invuln--;
+      if (this.counterActive > 0) this.counterActive--;
+      if (this.counterCooldown > 0) this.counterCooldown--;
+      if (this.hitstun > 0) this.hitstun--;
+      if (this.blockCooldown > 0) this.blockCooldown--;
+      if (this.endlag > 0) this.endlag--;
+
+      // Poison DoT — tick damage every 15 frames while poisoned (no knockback)
+      if (this.poisonTimer > 0) {
+        this.poisonTimer--;
+        this.poisonTick++;
+        if (this.poisonTick % 15 === 0) {
+          this.damage += 1.5;
+          spawnEffect(this.cx + (Math.random()-0.5)*20, this.cy + (Math.random()-0.5)*30, '#b6ff6a', 12, 8);
+        }
+      }
+
+      // Gravity — Jonah falls much slower (floaty)
+      const gravity = (this.key === 'jonah') ? 0.38 : 0.65;
+      const terminalVy = (this.key === 'jonah') ? 9 : 14;
+      this.vy += gravity;
+      if (this.vy > terminalVy) this.vy = terminalVy;
+
+      // Special-move velocity locks
+      if (this.moveState) {
+        if (this.moveState.type === 'burnDash') {
+          this.vx = this.facing * 11;
+          this.vy = Math.min(this.vy, 1);
+          // spawn fire trail
+          if (Math.random() < 0.7) spawnEffect(this.cx - this.facing * 10, this.cy + 10, '#ff6a2a', 14, 10);
+        }
+        if (this.moveState.type === 'fireUp') {
+          if (Math.random() < 0.8) spawnEffect(this.cx, this.y + this.h, '#ffaa33', 14, 10);
+        }
+        if (this.moveState.type === 'katanaUp') {
+          if (Math.random() < 0.5) spawnEffect(this.cx, this.cy, '#b088ff', 10, 8);
+        }
+        if (this.moveState.type === 'counter' && this.counterActive > 0) {
+          // visual ring handled in render
+        }
+        // Kele: Uppercut — rising arc, glove trail
+        if (this.moveState.type === 'uppercut') {
+          if (Math.random() < 0.6) spawnEffect(this.cx, this.cy + (Math.random()-0.5)*20, '#f0d050', 10, 8);
+        }
+        // Kele: Body Slam — drive downward hard after the initial hop
+        if (this.moveState.type === 'bodySlam') {
+          const m = this.moveState;
+          if (m.phase === 'launch') {
+            // Wait for peak of hop or being in air
+            if (this.vy >= 0 || !this.onGround) {
+              m.phase = 'drop';
+              this.vy = 6; // instant downward boost
+            }
+          } else if (m.phase === 'drop') {
+            // Accelerate downward
+            this.vy = Math.min(this.vy + 0.8, 18);
+            if (Math.random() < 0.7) spawnEffect(this.cx, this.cy + (Math.random()-0.5)*20, '#a34040', 14, 12);
+            // On ground-impact: trigger slam
+            if (this.onGround) {
+              m.phase = 'impact';
+              m.timer = 14; // short endlag
+              // Big visual shockwave
+              spawnEffect(this.cx, this.y + this.h, '#f0d050', 24, 50);
+              spawnEffect(this.cx, this.y + this.h, '#a34040', 22, 60);
+            }
+          }
+        }
+        // Kele: Power Punch — plant feet, grunt effect during windup
+        if (this.moveState.type === 'powerPunch') {
+          // Freeze horizontal movement during windup for that rooted-heavyweight feel
+          if (this.onGround) this.vx *= 0.5;
+          if (this.moveState.timer > 22 && Math.random() < 0.3) {
+            spawnEffect(this.cx + (Math.random()-0.5)*30, this.cy, '#f0d050', 14, 8);
+          }
+        }
+        // Jonah: Glide — cap fall speed very low and maintain forward drift
+        if (this.moveState.type === 'glide') {
+          this.vy = Math.min(this.vy, 0.8);       // only drift downward slowly
+          // Player-steerable horizontal direction during glide
+          const ctrl = controls[this.index];
+          if (keys[ctrl.left])  { this.vx = Math.max(this.vx - 0.3, -4.5); this.facing = -1; }
+          else if (keys[ctrl.right]) { this.vx = Math.min(this.vx + 0.3, 4.5); this.facing = 1; }
+          // Wing flap visual
+          if (Math.random() < 0.4) spawnEffect(this.cx + (Math.random()-0.5)*30, this.cy + 4, '#a0e0d0', 12, 10);
+        }
+        // Jonah: Mach 5 — fixed horizontal burst, neutralize vertical
+        if (this.moveState.type === 'mach5') {
+          this.vx = this.facing * 18;
+          this.vy = 0;
+          // Streak trail
+          spawnEffect(this.cx - this.facing * 14, this.cy + (Math.random()-0.5)*30, '#e070b0', 14, 14);
+          if (Math.random() < 0.5) spawnEffect(this.cx - this.facing * 22, this.cy + (Math.random()-0.5)*30, '#a0e0d0', 10, 8);
+        }
+        // Jonah: Ultra Spike — plummet downward; bounce off surface
+        if (this.moveState.type === 'ultraSpike') {
+          this.vx = 0;
+          this.vy = Math.min(this.vy + 1.2, 22);   // accelerate downward hard
+          // Red-pink streak
+          if (Math.random() < 0.7) spawnEffect(this.cx + (Math.random()-0.5)*20, this.y - 6, '#e070b0', 12, 10);
+          // Bounce on first ground contact
+          if (this.onGround && !this.moveState.bounced) {
+            this.moveState.bounced = true;
+            this.vy = -12;
+            spawnEffect(this.cx, this.y + this.h, '#e070b0', 22, 32);
+            spawnEffect(this.cx, this.y + this.h, '#a0e0d0', 18, 36);
+            // Refund a jump so they can act after the bounce
+            this.jumps = Math.max(this.jumps - 1, 0);
+            // End the move on bounce so Jonah regains control
+            this.moveState = null;
+            this.attackCooldown = 8;
+          }
+        }
+        // Kele: Suplex phases
+        if (this.moveState && this.moveState.type === 'suplex') {
+          const m = this.moveState;
+          if (m.grabbed) {
+            m.phaseTimer++;
+            // Lift phase — slowly rise a bit
+            if (m.phase === 'lift') {
+              if (m.phaseTimer < 14) {
+                this.vy = -2;
+              } else {
+                m.phase = 'slam';
+                m.phaseTimer = 0;
+                this.vy = 12;
+              }
+            } else if (m.phase === 'slam') {
+              this.vy = Math.min(this.vy + 1, 16);
+              if (this.onGround) {
+                // Impact: drop and blast opponent
+                const victim = m.grabbed;
+                victim.takeDamage(18, -this.facing * 4, -10, this);
+                spawnEffect(victim.cx, victim.cy, '#f0d050', 28, 50);
+                spawnEffect(this.cx, this.y + this.h, '#a34040', 22, 50);
+                m.grabbed = null;
+                this.moveState = null;
+                this.attackCooldown = 18;
+              }
+            }
+          }
+        }
+        // Rhys: Toxic Headbutt — windup then horizontal launch
+        if (this.moveState && this.moveState.type === 'toxHeadbutt') {
+          const t = this.moveState.timer;
+          // Windup phase: timer 38..28 (lock in place, twitch)
+          if (t > 28) {
+            this.vx = 0;
+            if (this.onGround) this.vy = Math.max(this.vy, 0);
+            if (t % 4 === 0) spawnEffect(this.cx + (Math.random()-0.5)*20, this.cy, '#b6ff6a', 10, 8);
+          } else {
+            // Launch phase: fling Rhys forward
+            if (!this.moveState.launched) {
+              this.moveState.launched = true;
+              this.vx = this.facing * 12;
+              this.vy = -4;
+              spawnEffect(this.cx, this.cy, '#5aaf3a', 20, 30);
+            }
+            // Maintain horizontal speed through light air resistance
+            this.vx *= 0.995;
+            if (Math.random() < 0.8) spawnEffect(this.cx - this.facing * 12, this.cy + (Math.random()-0.5)*20, '#5aaf3a', 16, 12);
+          }
+        }
+        // Rhys: Toxic Punch — maintain momentum, poison mist trail
+        if (this.moveState && this.moveState.type === 'toxPunch') {
+          if (Math.random() < 0.6) spawnEffect(this.cx + this.facing * 18, this.cy + (Math.random()-0.5)*20, '#b6ff6a', 12, 10);
+        }
+        // Rhys: Poison Lob windup
+        if (this.moveState && this.moveState.type === 'poisonLob' && this.moveState.timer > 12) {
+          if (Math.random() < 0.4) spawnEffect(this.cx, this.y - 6, '#b6ff6a', 10, 6);
+        }
+      }
+
+      // Poisoned visual drip
+      if (this.poisonTimer > 0 && Math.random() < 0.25) {
+        spawnEffect(this.cx + (Math.random()-0.5)*this.w, this.y + this.h, '#5aaf3a', 20, 6);
+      }
+
+      // Apply motion
+      this.x += this.vx;
+      this.y += this.vy;
+
+      // friction on ground
+      if (this.onGround && !this.moveState && this.hitstun === 0) {
+        this.vx *= 0.82;
+      }
+
+      // Ledge cooldown tick-down
+      if (this.ledgeCooldown > 0) this.ledgeCooldown--;
+
+      // If hanging on a ledge, freeze motion and process inputs specially
+      if (this.ledgeGrab) {
+        this.ledgeGrabTimer++;
+        // Snap position to the ledge hang spot
+        const lg = this.ledgeGrab;
+        this.x = lg.side === -1 ? lg.x - this.w : lg.x;
+        this.y = lg.y - this.h * 0.6; // hang with upper body at ledge level
+        this.vx = 0; this.vy = 0;
+        this.jumps = 0;
+        this.helpless = false;
+        // Invuln for the first 40 frames of a ledge hang (standard SSB)
+        if (this.ledgeGrabTimer < 40) this.invuln = Math.max(this.invuln, 2);
+        // Inputs: press up or away to climb, down/away to drop, attack/special to ledge-attack
+        const ctrl = controls[this.index];
+        const up = keys[ctrl.up];
+        const down = keys[ctrl.down];
+        const awayPress = lg.side === -1 ? keys[ctrl.right] : keys[ctrl.left];
+        const towardPress = lg.side === -1 ? keys[ctrl.left] : keys[ctrl.right];
+        if (up || awayPress) {
+          // Climb up onto the stage
+          this.ledgeGrab = null;
+          this.ledgeCooldown = 24;
+          this.y = lg.y - this.h - 2;
+          this.x = lg.side === -1 ? lg.x + 4 : lg.x - this.w - 4;
+          this.vx = lg.side === -1 ? 1.5 : -1.5;
+          this.vy = -2;
+          this.invuln = 10;
+          spawnEffect(this.cx, this.y + this.h, '#ffffff', 10, 16);
+        } else if (down || towardPress) {
+          // Drop off the ledge
+          this.ledgeGrab = null;
+          this.ledgeCooldown = 24;
+          this.vy = 2;
+        }
+        this.onGround = false;
+        return; // skip rest of update while hanging
+      }
+
+      // Collide with platforms
+      let grounded = false;
+      for (const p of platforms) {
+        if (!p.solid) continue;
+        // Top-surface collision (when falling onto a platform from above)
+        if (this.vy >= 0) {
+          const feet = this.y + this.h;
+          // Only consider if horizontally overlapping the platform
+          if (this.x + this.w > p.x + 4 && this.x < p.x + p.w - 4) {
+            // Only land if the feet crossed the top edge this frame
+            if (feet >= p.y && feet - this.vy <= p.y + 2) {
+              this.y = p.y - this.h;
+              this.vy = 0;
+              grounded = true;
+            }
+          }
+        }
+        // Main stage: also push fighter out sideways if they're inside the block
+        // (so you can't phase through the stage walls from the side).
+        // Only push if the side-overlap is less than the vertical overlap — this means
+        // the fighter entered from the side, not by falling past the top edge.
+        if (p.main) {
+          const fTop = this.y, fBot = this.y + this.h;
+          if (fBot > p.y + 4 && fTop < p.y + p.h &&
+              this.x + this.w > p.x && this.x < p.x + p.w) {
+            const overlapLeft = (this.x + this.w) - p.x;  // how far past left edge
+            const overlapRight = (p.x + p.w) - this.x;    // how far past right edge
+            const sideOverlap = Math.min(overlapLeft, overlapRight);
+            const vertOverlap = fBot - p.y;
+            // Only push out sideways if the side overlap is the shallower one.
+            // If the fighter is mostly below the top surface, they've clearly fallen
+            // past the edge and should keep falling.
+            if (sideOverlap < vertOverlap && sideOverlap < 20) {
+              if (overlapLeft < overlapRight) {
+                this.x = p.x - this.w;
+                if (this.vx > 0) this.vx = 0;
+              } else {
+                this.x = p.x + p.w;
+                if (this.vx < 0) this.vx = 0;
+              }
+            }
+          }
+        }
+      }
+      if (grounded && !this.onGround) {
+        this.jumps = 0;
+        this.helpless = false;
+        spawnEffect(this.cx, this.y + this.h, '#ffffff', 8, 10);
+      }
+      this.onGround = grounded;
+
+      // Ledge grab detection — must be falling (or helpless), off-stage, and near a corner.
+      // Cannot grab if already on the stage, or if on cooldown.
+      if (!this.onGround && this.ledgeCooldown <= 0 && this.vy >= -2 && this.respawnTimer === 0) {
+        for (const lg of LEDGES) {
+          // Which side of the stage is this ledge on?
+          // LEDGE_LEFT: fighter must be OFF the left edge (x < STAGE_LEFT) and near the corner
+          // LEDGE_RIGHT: fighter must be OFF the right edge (x > STAGE_RIGHT)
+          const onCorrectSide = lg.side === -1
+            ? (this.x + this.w < lg.x + 6)
+            : (this.x > lg.x - 6);
+          if (!onCorrectSide) continue;
+          // Within vertical + horizontal window near the ledge
+          const dx = lg.side === -1 ? (lg.x - (this.x + this.w)) : (this.x - lg.x);
+          const dy = this.y + this.h * 0.5 - lg.y;
+          if (dx >= -6 && dx < 28 && dy > -30 && dy < 60) {
+            // Grab!
+            this.ledgeGrab = lg;
+            this.ledgeGrabTimer = 0;
+            this.vx = 0; this.vy = 0;
+            this.hitstun = 0;
+            this.helpless = false;
+            this.moveState = null;
+            this.invuln = 40;
+            this.facing = -lg.side; // face toward the stage
+            spawnEffect(lg.x, lg.y, '#ffeb3b', 14, 20);
+            break;
+          }
+        }
+      }
+
+      // Blastzones — check world-space bounds
+      if (this.x + this.w < BLAST_LEFT || this.x > BLAST_RIGHT ||
+          this.y > BLAST_BOTTOM || this.y + this.h < BLAST_TOP) {
+        this.die();
+      }
+    }
+
+    die() {
+      this.stocks--;
+      this.damage = 0;
+      this.poisonTimer = 0;
+      this.poisonTick = 0;
+      // Death flash at the edge of the visible blastzone, in world coords
+      spawnEffect(Math.max(BLAST_LEFT + 20, Math.min(BLAST_RIGHT - 20, this.cx)),
+                  Math.max(BLAST_TOP + 20, Math.min(BLAST_BOTTOM - 20, this.cy)),
+                  '#ff4444', 30, 40);
+      if (this.stocks <= 0) {
+        this.x = -9999; this.y = -9999;
+        return;
+      }
+      this.respawnTimer = 40;
+      this.x = -9999; this.y = -9999;
+      this.vx = 0; this.vy = 0;
+    }
+
+    respawn() {
+      // Spawn above the stage in world coords
+      const stageCenter = (STAGE_LEFT + STAGE_RIGHT) / 2;
+      this.x = this.index === 0 ? stageCenter - 200 : stageCenter + 200;
+      this.y = STAGE_TOP - 250;
+      this.vx = 0; this.vy = 0;
+      this.invuln = 90;
+      this.hitstun = 0;
+      this.endlag = 0;
+      this.moveState = null;
+      this.blocking = false;
+      this.helpless = false;
+      this.ledgeGrab = null;
+    }
+
+    // Melee attack hitbox (for burn dash, katana slash, regular attacks)
+    getHitbox() {
+      if (!this.moveState) return null;
+      const t = this.moveState.type;
+      if (t === 'burnDash') {
+        return { x: this.x - 6, y: this.y + 10, w: this.w + 12, h: this.h - 20,
+                 damage: 11, kbx: this.facing * 6, kby: -4, type: 'fire' };
+      }
+      if (t === 'fireUp') {
+        return { x: this.x - 4, y: this.y, w: this.w + 8, h: this.h,
+                 damage: 10, kbx: this.facing * 3, kby: -8, type: 'fire' };
+      }
+      if (t === 'katanaUp') {
+        return { x: this.x - 8, y: this.y - 20, w: this.w + 16, h: this.h + 20,
+                 damage: 12, kbx: this.facing * 3, kby: -9, type: 'slash' };
+      }
+      // Rhys: Toxic Headbutt — body is a hitbox only during the launch phase
+      if (t === 'toxHeadbutt' && this.moveState.launched) {
+        return { x: this.x - 4, y: this.y + 4, w: this.w + 8, h: this.h - 8,
+                 damage: 7, kbx: this.facing * 5, kby: -5, type: 'poison', poison: true };
+      }
+      // Rhys: Toxic Punch — active window, damage + KB scale with snapshot speed
+      if (t === 'toxPunch') {
+        const elapsed = 24 - this.moveState.timer;
+        const [a, b] = this.moveState.active;
+        if (elapsed < a || elapsed > b) return null;
+        const speed = this.moveState.punchSpeed;
+        // Base 9 dmg at rest → up to ~17 dmg at top speed.
+        // KB multiplier scales from 1.0 → ~2.2 based on momentum.
+        const speedBonus = Math.min(speed / 3.5, 2.0); // 0..2
+        const dmg = 9 + speedBonus * 4;
+        const kbMult = 1 + speedBonus * 0.6;
+        return { x: this.facing === 1 ? this.x + this.w - 2 : this.x - 42,
+                 y: this.y + 14, w: 44, h: 28,
+                 damage: dmg, kbx: this.facing * 6 * kbMult, kby: -3.5 * kbMult,
+                 type: 'poison', poison: true };
+      }
+      // Greyson: Hard Punch — single heavy blow, high damage + high KB
+      if (t === 'hardPunch') {
+        const elapsed = 30 - this.moveState.timer;
+        const [a, b] = this.moveState.active;
+        if (elapsed < a || elapsed > b) return null;
+        return { x: this.facing === 1 ? this.x + this.w - 2 : this.x - 46,
+                 y: this.y + 10, w: 48, h: 36,
+                 damage: 15, kbx: this.facing * 8, kby: -5, type: 'heavy' };
+      }
+      // Greyson: Command Grab — bypasses shield (flagged grab: true)
+      if (t === 'cmdGrab' && !this.moveState.grabbed) {
+        const elapsed = 30 - this.moveState.timer;
+        const [a, b] = this.moveState.active;
+        if (elapsed < a || elapsed > b) return null;
+        return { x: this.facing === 1 ? this.x + this.w - 4 : this.x - 36,
+                 y: this.y + 6, w: 40, h: this.h - 12,
+                 damage: 0, kbx: 0, kby: 0, type: 'grab', grab: true };
+      }
+      // Kele: Power Punch — strongest single hit, massive knockback
+      if (t === 'powerPunch') {
+        const elapsed = 36 - this.moveState.timer;
+        const [a, b] = this.moveState.active;
+        if (elapsed < a || elapsed > b) return null;
+        return { x: this.facing === 1 ? this.x + this.w - 2 : this.x - 56,
+                 y: this.y + 8, w: 58, h: 40,
+                 damage: 20, kbx: this.facing * 11, kby: -7, type: 'heavy' };
+      }
+      // Kele: Uppercut — rising hit, flags victim into free-fall
+      if (t === 'uppercut') {
+        const elapsed = 28 - this.moveState.timer;
+        const [a, b] = this.moveState.active;
+        if (elapsed < a || elapsed > b) return null;
+        return { x: this.x - 6, y: this.y - 18, w: this.w + 12, h: this.h + 20,
+                 damage: 14, kbx: this.facing * 2, kby: -11, type: 'heavy', uppercut: true };
+      }
+      // Kele: Body Slam — only hits on the impact frame
+      if (t === 'bodySlam' && this.moveState.phase === 'drop') {
+        // Hitbox while falling + the impact itself
+        return { x: this.x - 6, y: this.y + this.h - 8, w: this.w + 12, h: 20,
+                 damage: 16, kbx: this.facing * 4, kby: -8, type: 'heavy' };
+      }
+      if (t === 'bodySlam' && this.moveState.phase === 'impact') {
+        // Shockwave on ground — wider horizontal AoE after landing
+        const elapsed = 14 - this.moveState.timer;
+        if (elapsed > 6) return null; // active briefly
+        return { x: this.x - 50, y: this.y + this.h - 14, w: this.w + 100, h: 18,
+                 damage: 10, kbx: this.facing * 6, kby: -5, type: 'heavy' };
+      }
+      // Kele: Suplex — grab hitbox (pierces shield)
+      if (t === 'suplex' && !this.moveState.grabbed) {
+        const elapsed = 32 - this.moveState.timer;
+        const [a, b] = this.moveState.active;
+        if (elapsed < a || elapsed > b) return null;
+        return { x: this.facing === 1 ? this.x + this.w - 4 : this.x - 34,
+                 y: this.y + 6, w: 38, h: this.h - 12,
+                 damage: 0, kbx: 0, kby: 0, type: 'grab', grab: true, suplex: true };
+      }
+      // Jonah: Ultra Spike — body is a hitbox while plummeting (before bounce)
+      if (t === 'ultraSpike' && !this.moveState.bounced) {
+        return { x: this.x - 2, y: this.y + 6, w: this.w + 4, h: this.h - 4,
+                 damage: 11, kbx: 0, kby: 10, type: 'spike' };
+      }
+      // Regular attacks: check active frame window
+      if (t.startsWith('atk_')) {
+        const m = this.moveState;
+        // Compute elapsed frames since start (timer counts down from initial value)
+        const elapsed = this.attackInitialTimer(t) - m.timer;
+        if (elapsed < m.active[0] || elapsed > m.active[1]) return null;
+        const reach = m.reach;
+        let hx, hy, hw, hh;
+        if (m.around) {
+          hx = this.x - 12; hy = this.y - 6; hw = this.w + 24; hh = this.h + 12;
+        } else if (m.back) {
+          hx = this.x - reach; hy = this.y + 14; hw = reach; hh = 28;
+        } else if (m.vertical === -1) {
+          hx = this.x - 6; hy = this.y - reach; hw = this.w + 12; hh = reach + 10;
+        } else if (m.vertical === 1) {
+          if (t === 'atk_dair') {
+            hx = this.x + 4; hy = this.y + this.h - 4; hw = this.w - 8; hh = reach;
+          } else {
+            hx = this.x - 4; hy = this.y + this.h - 14; hw = this.w + 8; hh = 16;
+          }
+        } else {
+          const forward = this.facing === 1;
+          hx = forward ? this.x + this.w : this.x - reach;
+          hy = this.y + 16; hw = reach; hh = 28;
+        }
+        // Rhys hits softer on regular attacks (trapper identity: low base, high DoT)
+        let dmg = m.dmg;
+        if (this.key === 'rhys') dmg = Math.max(1, dmg * 0.55);
+        return { x: hx, y: hy, w: hw, h: hh,
+                 damage: dmg, kbx: m.kbx, kby: m.kby, type: m.flavor };
+      }
+      return null;
+    }
+
+    attackInitialTimer(t) {
+      // Must match the timer values set in startAttack
+      const map = {
+        atk_jab: 12, atk_ftilt: 18, atk_utilt: 18, atk_dtilt: 16,
+        atk_nair: 22, atk_fair: 20, atk_bair: 20, atk_uair: 20, atk_dair: 22,
+      };
+      return map[t] || 16;
+    }
+
+    render(ctx) {
+      if (this.respawnTimer > 0) return;
+      const c = this.def;
+
+      // Ledge hang — pulsing highlight to show invulnerable hang
+      if (this.ledgeGrab) {
+        const lg = this.ledgeGrab;
+        // Glow around ledge while invuln
+        if (this.ledgeGrabTimer < 40) {
+          const alpha = 0.5 - this.ledgeGrabTimer / 80;
+          ctx.strokeStyle = `rgba(255, 235, 59, ${alpha})`;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.arc(lg.x, lg.y, 18 + this.ledgeGrabTimer * 0.3, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+        // Arm reaching up to the ledge
+        ctx.strokeStyle = '#ffddba';
+        ctx.lineWidth = 4;
+        ctx.beginPath();
+        ctx.moveTo(this.cx, this.y + 20);
+        ctx.lineTo(lg.x, lg.y - 2);
+        ctx.stroke();
+      }
+
+      // Counter ring
+      if (this.counterActive > 0) {
+        ctx.strokeStyle = this.key === 'nico' ? '#ffaa33' : '#b088ff';
+        ctx.lineWidth = 3;
+        ctx.globalAlpha = 0.7;
+        ctx.beginPath();
+        ctx.arc(this.cx, this.cy, 42, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+      }
+
+      // Poison aura — pulsing green ring around poisoned fighters
+      if (this.poisonTimer > 0) {
+        const pulse = 0.4 + Math.sin(this.poisonTick * 0.15) * 0.15;
+        ctx.fillStyle = `rgba(90, 175, 58, ${pulse * 0.3})`;
+        ctx.beginPath();
+        ctx.ellipse(this.cx, this.cy, this.w * 0.9, this.h * 0.6, 0, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      // Helpless / free-fall indicator — small swirl of dots circling the head
+      if (this.helpless) {
+        const t = Date.now() * 0.008;
+        for (let k = 0; k < 3; k++) {
+          const ang = t + k * (Math.PI * 2 / 3);
+          const dx = Math.cos(ang) * 14;
+          const dy = Math.sin(ang) * 5;
+          ctx.fillStyle = '#ffeb3b';
+          ctx.beginPath();
+          ctx.arc(this.cx + dx, this.y - 6 + dy, 2.5, 0, Math.PI*2);
+          ctx.fill();
+        }
+      }
+
+      // Endlag indicator — dust puffs at the feet and a recovery bar above the head
+      if (this.endlag > 0) {
+        // Dust puffs near feet
+        const alpha = Math.min(1, this.endlag / 15);
+        for (let k = 0; k < 3; k++) {
+          const dx = (k - 1) * 9;
+          ctx.fillStyle = `rgba(180, 180, 180, ${alpha * 0.6})`;
+          ctx.beginPath();
+          ctx.arc(this.cx + dx, this.y + this.h - 2, 3 + (k === 1 ? 1 : 0), 0, Math.PI*2);
+          ctx.fill();
+        }
+        // Tiny bar above head showing remaining endlag frames
+        const maxLag = 22; // max we ever set
+        const barW = 24;
+        const frac = Math.min(1, this.endlag / maxLag);
+        ctx.fillStyle = 'rgba(0,0,0,0.5)';
+        ctx.fillRect(this.cx - barW/2, this.y - 8, barW, 3);
+        ctx.fillStyle = '#ff9a2a';
+        ctx.fillRect(this.cx - barW/2, this.y - 8, barW * frac, 3);
+      }
+
+      // Blocking shield
+      if (this.blocking) {
+        ctx.fillStyle = 'rgba(120, 220, 255, 0.25)';
+        ctx.strokeStyle = 'rgba(120, 220, 255, 0.8)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.arc(this.cx, this.cy, 36, 0, Math.PI * 2);
+        ctx.fill(); ctx.stroke();
+      }
+
+      // Flicker when invulnerable
+      if (this.invuln > 0 && Math.floor(this.invuln / 4) % 2 === 0) {
+        ctx.globalAlpha = 0.4;
+      }
+
+      // Body
+      ctx.fillStyle = c.color;
+      ctx.fillRect(this.x, this.y, this.w, this.h);
+      // Accent stripe
+      ctx.fillStyle = c.color2;
+      ctx.fillRect(this.x, this.y + 18, this.w, 8);
+
+      // Head
+      ctx.fillStyle = '#ffddba';
+      ctx.fillRect(this.x + 8, this.y + 2, 20, 16);
+
+      // Eye (shows facing)
+      ctx.fillStyle = '#222';
+      if (this.facing === 1) ctx.fillRect(this.x + 22, this.y + 8, 4, 4);
+      else ctx.fillRect(this.x + 10, this.y + 8, 4, 4);
+
+      // Character emblem
+      ctx.fillStyle = '#000';
+      ctx.font = 'bold 10px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(this.key === 'nico' ? 'N' : 'D', this.cx, this.y + 42);
+
+      // Player indicator (arrow above head)
+      ctx.fillStyle = this.index === 0 ? '#ff6a2a' : '#4ab8ff';
+      ctx.beginPath();
+      ctx.moveTo(this.cx, this.y - 14);
+      ctx.lineTo(this.cx - 6, this.y - 4);
+      ctx.lineTo(this.cx + 6, this.y - 4);
+      ctx.closePath();
+      ctx.fill();
+
+      // Weapon visual during special
+      if (this.moveState) {
+        const t = this.moveState.type;
+        if (t === 'katanaUp') {
+          ctx.strokeStyle = '#e8e8ff';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(this.cx, this.y + 10);
+          ctx.lineTo(this.cx + this.facing * 8, this.y - 30);
+          ctx.stroke();
+          ctx.strokeStyle = '#b088ff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+        }
+        if (t === 'counter') {
+          ctx.strokeStyle = this.key === 'nico' ? '#ff6a2a' : '#4ab8ff';
+          ctx.lineWidth = 2;
+          ctx.strokeRect(this.x - 3, this.y - 3, this.w + 6, this.h + 6);
+        }
+        // Regular attack swing visuals — draw a slash/fist during active frames
+        if (t.startsWith('atk_')) {
+          const hb = this.getHitbox();
+          if (hb) {
+            const palettes = {
+              nico: { main: '#ff6a2a', hot: '#ffeb3b' },
+              derek: { main: '#b088ff', hot: '#e8e8ff' },
+              rhys: { main: '#5aaf3a', hot: '#b6ff6a' },
+              greyson: { main: '#6a7a4a', hot: '#d4c77a' },
+              kele: { main: '#a34040', hot: '#f0d050' },
+              jonah: { main: '#e070b0', hot: '#a0e0d0' },
+            };
+            const { main: mainColor, hot: hotColor } = palettes[this.key];
+            // filled swipe shape
+            ctx.fillStyle = mainColor;
+            ctx.globalAlpha = 0.55;
+            ctx.fillRect(hb.x, hb.y, hb.w, hb.h);
+            ctx.globalAlpha = 1;
+            // bright outline
+            ctx.strokeStyle = hotColor;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
+            // diagonal slash accent
+            ctx.strokeStyle = hotColor;
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            if (t === 'atk_dair') {
+              ctx.moveTo(hb.x + hb.w/2, hb.y);
+              ctx.lineTo(hb.x + hb.w/2, hb.y + hb.h);
+            } else if (t === 'atk_uair' || t === 'atk_utilt') {
+              ctx.moveTo(hb.x, hb.y + hb.h);
+              ctx.lineTo(hb.x + hb.w, hb.y);
+            } else {
+              ctx.moveTo(hb.x, hb.y + hb.h);
+              ctx.lineTo(hb.x + hb.w, hb.y);
+            }
+            ctx.stroke();
+          }
+        }
+        // Rhys: Toxic Headbutt windup crouch + launched body trail
+        if (t === 'toxHeadbutt') {
+          if (this.moveState.timer > 28) {
+            // Windup glow on head
+            ctx.fillStyle = 'rgba(182, 255, 106, 0.5)';
+            ctx.beginPath();
+            ctx.arc(this.cx, this.y + 8, 12 + Math.sin(this.moveState.timer * 0.5) * 3, 0, Math.PI*2);
+            ctx.fill();
+          } else {
+            // Launched: show green streak trail behind
+            ctx.fillStyle = 'rgba(90, 175, 58, 0.5)';
+            ctx.fillRect(this.x - this.facing * 20, this.y + 6, 24, this.h - 12);
+          }
+        }
+        // Rhys: Toxic Punch — draw a big punch hitbox with green glow
+        if (t === 'toxPunch') {
+          const hb = this.getHitbox();
+          if (hb) {
+            ctx.fillStyle = 'rgba(90, 175, 58, 0.55)';
+            ctx.fillRect(hb.x, hb.y, hb.w, hb.h);
+            ctx.strokeStyle = '#b6ff6a';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
+            // impact burst
+            ctx.fillStyle = '#b6ff6a';
+            const bx = this.facing === 1 ? hb.x + hb.w : hb.x;
+            ctx.beginPath();
+            ctx.arc(bx, hb.y + hb.h/2, 6, 0, Math.PI*2);
+            ctx.fill();
+          }
+        }
+        // Greyson: Hard Punch — chunky impact box with shockwave
+        if (t === 'hardPunch') {
+          const hb = this.getHitbox();
+          if (hb) {
+            // wind-up pose: before active, draw a cocked-back arm
+            // (active window: frames 8-16 of a 30-frame move)
+            ctx.fillStyle = 'rgba(106, 122, 74, 0.7)';
+            ctx.fillRect(hb.x, hb.y, hb.w, hb.h);
+            ctx.strokeStyle = '#d4c77a';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
+            // fist core — big circle
+            const fx = this.facing === 1 ? hb.x + hb.w - 10 : hb.x + 10;
+            ctx.fillStyle = '#d4c77a';
+            ctx.beginPath();
+            ctx.arc(fx, hb.y + hb.h/2, 10, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(fx - this.facing * 3, hb.y + hb.h/2 - 3, 3, 0, Math.PI*2);
+            ctx.fill();
+            // shockwave lines radiating forward
+            ctx.strokeStyle = 'rgba(212, 199, 122, 0.6)';
+            ctx.lineWidth = 2;
+            for (let k = 0; k < 3; k++) {
+              ctx.beginPath();
+              const sx = fx + this.facing * (6 + k * 5);
+              ctx.moveTo(sx, hb.y + 4);
+              ctx.lineTo(sx + this.facing * 8, hb.y + hb.h - 4);
+              ctx.stroke();
+            }
+          } else if (this.moveState.timer > 16) {
+            // windup: small arm-pull shape behind
+            ctx.fillStyle = 'rgba(106, 122, 74, 0.5)';
+            ctx.fillRect(this.x - this.facing * 10, this.y + 18, 10, 20);
+          }
+        }
+        // Greyson: Mega Jump — boost trail beneath feet
+        if (t === 'megaJump') {
+          const age = 28 - this.moveState.timer;
+          if (age < 14) {
+            // plume of exhaust
+            ctx.fillStyle = 'rgba(212, 199, 122, 0.6)';
+            for (let k = 0; k < 4; k++) {
+              const py = this.y + this.h + k * 8;
+              const pw = 30 - k * 4;
+              ctx.fillRect(this.cx - pw/2, py, pw, 6);
+            }
+            ctx.fillStyle = 'rgba(106, 122, 74, 0.5)';
+            for (let k = 0; k < 3; k++) {
+              const py = this.y + this.h + 4 + k * 10;
+              const pw = 20 - k * 4;
+              ctx.fillRect(this.cx - pw/2, py, pw, 4);
+            }
+            // lift-off flash
+            if (age < 4) {
+              ctx.fillStyle = '#ffffff';
+              ctx.beginPath();
+              ctx.arc(this.cx, this.y + this.h, 18 - age * 4, 0, Math.PI*2);
+              ctx.fill();
+            }
+          }
+        }
+        // Greyson: Command Grab — reaching arm, then held-victim indicator
+        if (t === 'cmdGrab') {
+          if (this.moveState.grabbed) {
+            // Lock indicator ring around the hold area
+            ctx.strokeStyle = '#d4c77a';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(this.x + this.facing * 20, this.y, 36, this.h);
+            ctx.fillStyle = 'rgba(212, 199, 122, 0.3)';
+            ctx.fillRect(this.x + this.facing * 20, this.y, 36, this.h);
+            // grab arm
+            ctx.strokeStyle = '#6a7a4a';
+            ctx.lineWidth = 6;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.y + 22);
+            ctx.lineTo(this.cx + this.facing * 32, this.y + 22);
+            ctx.stroke();
+          } else {
+            const hb = this.getHitbox();
+            if (hb) {
+              // reaching arm with open hand during grab attempt
+              ctx.strokeStyle = '#6a7a4a';
+              ctx.lineWidth = 6;
+              ctx.beginPath();
+              ctx.moveTo(this.cx, this.y + 22);
+              ctx.lineTo(this.cx + this.facing * 30, this.y + 22);
+              ctx.stroke();
+              // open claw
+              ctx.strokeStyle = '#d4c77a';
+              ctx.lineWidth = 3;
+              ctx.beginPath();
+              const hx = this.cx + this.facing * 32;
+              ctx.moveTo(hx, this.y + 14);
+              ctx.lineTo(hx + this.facing * 6, this.y + 22);
+              ctx.lineTo(hx, this.y + 30);
+              ctx.stroke();
+            }
+          }
+        }
+        // Kele: Power Punch — glowing cocked-back windup then massive fist
+        if (t === 'powerPunch') {
+          const hb = this.getHitbox();
+          if (hb) {
+            // Active: massive red-gold impact box with radiating shock lines
+            ctx.fillStyle = 'rgba(163, 64, 64, 0.65)';
+            ctx.fillRect(hb.x, hb.y, hb.w, hb.h);
+            ctx.strokeStyle = '#f0d050';
+            ctx.lineWidth = 4;
+            ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
+            // Huge fist
+            const fx = this.facing === 1 ? hb.x + hb.w - 12 : hb.x + 12;
+            ctx.fillStyle = '#a34040';
+            ctx.beginPath();
+            ctx.arc(fx, hb.y + hb.h/2, 14, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#f0d050';
+            ctx.beginPath();
+            ctx.arc(fx, hb.y + hb.h/2, 9, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(fx - this.facing * 3, hb.y + hb.h/2 - 3, 4, 0, Math.PI*2);
+            ctx.fill();
+            // shockwave arcs
+            ctx.strokeStyle = 'rgba(240, 208, 80, 0.7)';
+            ctx.lineWidth = 3;
+            for (let k = 0; k < 4; k++) {
+              ctx.beginPath();
+              ctx.arc(fx, hb.y + hb.h/2, 18 + k * 6, -Math.PI/3, Math.PI/3);
+              ctx.stroke();
+            }
+          } else if (this.moveState.timer > 22) {
+            // Windup: glowing arm pulled back, with super-armor aura
+            const wpulse = Math.sin(this.moveState.timer * 0.4) * 3;
+            ctx.fillStyle = `rgba(240, 208, 80, ${0.3 + Math.sin(this.moveState.timer * 0.3) * 0.15})`;
+            ctx.beginPath();
+            ctx.arc(this.cx - this.facing * 16, this.y + 26, 12 + wpulse, 0, Math.PI*2);
+            ctx.fill();
+            // super-armor ring around Kele during windup
+            ctx.strokeStyle = 'rgba(240, 208, 80, 0.7)';
+            ctx.lineWidth = 2;
+            ctx.strokeRect(this.x - 3, this.y - 3, this.w + 6, this.h + 6);
+          }
+        }
+        // Kele: Uppercut — rising glove with arc trail
+        if (t === 'uppercut') {
+          const hb = this.getHitbox();
+          if (hb) {
+            ctx.fillStyle = 'rgba(163, 64, 64, 0.5)';
+            ctx.fillRect(hb.x, hb.y, hb.w, hb.h);
+            ctx.strokeStyle = '#f0d050';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
+            // rising fist
+            ctx.fillStyle = '#a34040';
+            ctx.beginPath();
+            ctx.arc(this.cx + this.facing * 10, this.y - 10, 10, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#f0d050';
+            ctx.beginPath();
+            ctx.arc(this.cx + this.facing * 10, this.y - 10, 6, 0, Math.PI*2);
+            ctx.fill();
+            // arc trail
+            ctx.strokeStyle = 'rgba(240, 208, 80, 0.55)';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(this.x + this.w/2, this.y + this.h - 10);
+            ctx.quadraticCurveTo(this.cx + this.facing * 4, this.y + 10, this.cx + this.facing * 10, this.y - 10);
+            ctx.stroke();
+          }
+        }
+        // Kele: Body Slam — drop motion lines + impact shockwave
+        if (t === 'bodySlam') {
+          const m = this.moveState;
+          if (m.phase === 'drop') {
+            // Motion lines above Kele showing downward drive
+            ctx.strokeStyle = 'rgba(163, 64, 64, 0.6)';
+            ctx.lineWidth = 2;
+            for (let k = 0; k < 4; k++) {
+              const lx = this.x + 4 + k * 8;
+              ctx.beginPath();
+              ctx.moveTo(lx, this.y - 8);
+              ctx.lineTo(lx, this.y - 20);
+              ctx.stroke();
+            }
+            // Red glow underneath
+            ctx.fillStyle = 'rgba(240, 208, 80, 0.5)';
+            ctx.fillRect(this.x - 4, this.y + this.h - 6, this.w + 8, 10);
+          } else if (m.phase === 'impact') {
+            // Ground shockwave — expanding horizontal arcs
+            const elapsed = 14 - m.timer;
+            const r = elapsed * 8 + 20;
+            ctx.strokeStyle = `rgba(240, 208, 80, ${Math.max(0, 1 - elapsed / 10)})`;
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.arc(this.cx, this.y + this.h, r, Math.PI, Math.PI * 2);
+            ctx.stroke();
+            ctx.strokeStyle = `rgba(163, 64, 64, ${Math.max(0, 1 - elapsed / 8)})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.arc(this.cx, this.y + this.h, r + 6, Math.PI, Math.PI * 2);
+            ctx.stroke();
+            // dust kicked up
+            for (let k = 0; k < 5; k++) {
+              const px = this.cx + (k - 2) * 15;
+              ctx.fillStyle = `rgba(240, 208, 80, ${Math.max(0, 0.4 - elapsed / 20)})`;
+              ctx.beginPath();
+              ctx.arc(px, this.y + this.h - 4, 4 + Math.random() * 3, 0, Math.PI*2);
+              ctx.fill();
+            }
+          }
+        }
+        // Kele: Suplex — reaching grab, then overhead hold indicator
+        if (t === 'suplex') {
+          if (this.moveState.grabbed) {
+            // Lock indicator around held victim (above or below depending on phase)
+            const gy = this.moveState.phase === 'slam' ? this.y - 20 : this.y - 40;
+            ctx.strokeStyle = '#f0d050';
+            ctx.lineWidth = 3;
+            ctx.strokeRect(this.x - 6, gy - 6, this.w + 12, 52);
+            ctx.fillStyle = 'rgba(240, 208, 80, 0.3)';
+            ctx.fillRect(this.x - 6, gy - 6, this.w + 12, 52);
+            // grasp arms holding victim
+            ctx.strokeStyle = '#a34040';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(this.cx - 10, this.y + 20);
+            ctx.lineTo(this.cx - 10, gy + 20);
+            ctx.moveTo(this.cx + 10, this.y + 20);
+            ctx.lineTo(this.cx + 10, gy + 20);
+            ctx.stroke();
+          } else {
+            const hb = this.getHitbox();
+            if (hb) {
+              // reaching arm, red+gold
+              ctx.strokeStyle = '#a34040';
+              ctx.lineWidth = 6;
+              ctx.beginPath();
+              ctx.moveTo(this.cx, this.y + 22);
+              ctx.lineTo(this.cx + this.facing * 28, this.y + 22);
+              ctx.stroke();
+              // open grasping hand
+              ctx.strokeStyle = '#f0d050';
+              ctx.lineWidth = 3;
+              ctx.beginPath();
+              const hx = this.cx + this.facing * 30;
+              ctx.moveTo(hx, this.y + 12);
+              ctx.lineTo(hx + this.facing * 6, this.y + 22);
+              ctx.lineTo(hx, this.y + 32);
+              ctx.stroke();
+            }
+          }
+        }
+      }
+
+      ctx.globalAlpha = 1;
+      ctx.textAlign = 'left';
+    }
+  }
+
+  // ---------- MATCH ----------
+  let fighters = [];
+
+  function startMatch() {
+    projectiles.length = 0;
+    effects.length = 0;
+    const p1Key = CHAR_KEYS[menuSel[0]];
+    const p2Key = CHAR_KEYS[menuSel[1]];
+    fighters = [
+      new Fighter(p1Key, W * 0.3, 1, 0),
+      new Fighter(p2Key, W * 0.7, -1, 1),
+    ];
+    fighters[0].invuln = 60;
+    fighters[1].invuln = 60;
+    winner = null;
+    state = STATE.PLAY;
+  }
+
+  // ---------- PROJECTILE LOGIC ----------
+  function explodeGrenade(p) {
+    // Radius blast: damage everyone in range based on distance
+    const cx = p.x + p.w/2, cy = p.y + p.h/2;
+    const R = 70;
+    spawnEffect(cx, cy, '#ffeb3b', 28, 60);
+    spawnEffect(cx, cy, '#ff9a2a', 22, 70);
+    for (const f of fighters) {
+      if (f.respawnTimer > 0 || f.invuln > 0) continue;
+      const dx = f.cx - cx, dy = f.cy - cy;
+      const dist = Math.hypot(dx, dy);
+      if (dist > R) continue;
+      // Falloff: full damage at center, 40% at edge
+      const fall = 1 - (dist / R) * 0.6;
+      const dmg = 12 * fall;
+      const dir = dist < 1 ? 1 : 1 / dist;
+      const kbx = dx * dir * 6;
+      const kby = Math.min(-3, (dy - 20) * dir * 6);
+      // Counter check
+      if (f.counterActive > 0 && f !== p.owner) {
+        p.owner.takeDamage(dmg * 1.5, -kbx * 1.3, -5, f);
+        spawnEffect(f.cx, f.cy, '#ffffff', 20, 36);
+        f.counterActive = 0;
+        f.counterCooldown = 60;
+        continue;
+      }
+      // Grenades can also friendly-fire Greyson himself (part of the risk)
+      f.takeDamage(dmg, kbx, kby, p.owner);
+    }
+  }
+
+  function updateProjectiles() {
+    for (let i = projectiles.length - 1; i >= 0; i--) {
+      const p = projectiles[i];
+      p.life--;
+      // Stationary/tick-only projectile types don't get physics
+      const stationary = (p.type === 'smoke' || p.type === 'poisonCloud' || p.type === 'sporeTrap');
+      if (!stationary) {
+        p.vy += p.gravity || 0;
+        p.x += p.vx;
+        p.y += p.vy;
+      } else {
+        p.tick = (p.tick || 0) + 1;
+      }
+      if (p.type === 'shuriken') p.spin += 0.5;
+      if (p.type === 'fireball') p.wobble += 0.4;
+      if (p.type === 'grenade') p.spin = (p.spin || 0) + 0.3;
+
+      // Grenade fuse — explode in place after timer runs out
+      if (p.type === 'grenade' && !stationary) {
+        p.fuse--;
+        if (p.fuse <= 0) {
+          explodeGrenade(p);
+          p.life = 0;
+          continue;
+        }
+        // Bounce on ground rather than stick
+        if (p.y + p.h > GROUND_Y) {
+          p.y = GROUND_Y - p.h;
+          p.vy = -Math.abs(p.vy) * 0.4;
+          p.vx *= 0.7;
+          if (Math.abs(p.vy) < 1) p.vy = 0;
+        }
+      }
+
+      // Spore trap arming
+      if (p.type === 'sporeTrap' && !p.armed && !p.triggered) {
+        p.armTimer--;
+        if (p.armTimer <= 0) p.armed = true;
+      }
+
+      // hit main floor
+      if (p.y + p.h > GROUND_Y && !stationary && p.type !== 'grenade') {
+        if (p.type === 'poisonLob') {
+          // Spawn a poison cloud where it landed, then despawn
+          projectiles.push({
+            owner: p.owner, x: p.x - 32, y: GROUND_Y - 70,
+            vx: 0, vy: 0, w: 80, h: 80,
+            life: 80, damage: 0.8, kbx: 0, kby: -0.5,
+            type: 'poisonCloud', gravity: 0, tick: 0,
+            hitCooldowns: new Map(),
+          });
+          spawnEffect(p.x + p.w/2, GROUND_Y, '#5aaf3a', 20, 28);
+          p.life = 0;
+        } else {
+          p.life = 0;
+          spawnEffect(p.x + p.w/2, p.y + p.h, '#ffaa33', 12, 14);
+        }
+      }
+
+      // off-screen
+      if (p.x < -100 || p.x > W + 100) p.life = 0;
+
+      // collide with fighters
+      for (const f of fighters) {
+        // sporeTrap ignores its owner; poisonCloud hits everyone including Rhys himself
+        if (p.type === 'sporeTrap') {
+          if (f === p.owner) continue;
+          if (!p.armed || p.triggered) continue;
+        } else if (p.type === 'poisonCloud') {
+          // no-op: can hit owner too
+        } else if (f === p.owner) continue;
+        if (f.respawnTimer > 0 || f.invuln > 0) continue;
+        const pBox = { x: p.x, y: p.y, w: p.w, h: p.h };
+        const fBox = { x: f.x, y: f.y, w: f.w, h: f.h };
+        if (rectsOverlap(pBox, fBox)) {
+          if (p.type === 'smoke') {
+            if (p.tick % 8 === 0) {
+              f.takeDamage(p.damage, p.kbx, p.kby, p.owner);
+            }
+          } else if (p.type === 'poisonCloud') {
+            // Per-fighter cooldown so each fighter gets hit at most every 18 frames
+            const last = p.hitCooldowns.get(f) || -999;
+            if (p.tick - last > 18) {
+              f.takeDamage(p.damage, p.kbx, p.kby, p.owner);
+              f.applyPoison(90);
+              p.hitCooldowns.set(f, p.tick);
+            }
+          } else if (p.type === 'sporeTrap') {
+            // Trigger: detonate, damage, poison
+            p.triggered = true;
+            p.life = 30;
+            f.takeDamage(p.damage, p.kbx, p.kby, p.owner);
+            f.applyPoison(90);
+            spawnEffect(p.x + p.w/2, p.y, '#5aaf3a', 24, 36);
+          } else if (p.type === 'grenade') {
+            // Direct hit — explode immediately
+            explodeGrenade(p);
+            p.life = 0;
+            break;
+          } else {
+            // Counter check on any fighter
+            if (f.counterActive > 0) {
+              const mult = 1.5;
+              const dmg = (p.damage || 5) * mult;
+              const kbx = -p.vx * 1.5;
+              const kby = -4;
+              p.owner.takeDamage(dmg, kbx, kby, f);
+              spawnEffect(f.cx, f.cy, '#ffffff', 20, 36);
+              f.counterActive = 0;
+              f.counterCooldown = 60;
+              p.life = 0;
+              break;
+            }
+            f.takeDamage(p.damage, p.kbx, p.kby, p.owner);
+            // Poison-flagged projectiles apply poison
+            if (p.type === 'poisonLob') {
+              f.applyPoison(90);
+            }
+            if (p.type !== 'bolt') p.life = 0;
+          }
+        }
+      }
+
+      if (p.life <= 0) projectiles.splice(i, 1);
+    }
+  }
+
+  // ---------- MELEE HIT RESOLUTION ----------
+  function resolveMelee() {
+    for (const atk of fighters) {
+      // If already grabbed someone with cmdGrab, process Greyson throw
+      if (atk.moveState && atk.moveState.type === 'cmdGrab' && atk.moveState.grabbed) {
+        const victim = atk.moveState.grabbed;
+        atk.moveState.throwTimer--;
+        if (atk.moveState.throwTimer <= 0) {
+          // Release and throw
+          victim.takeDamage(14, atk.facing * 7, -7, atk);
+          spawnEffect(victim.cx, victim.cy, '#d4c77a', 24, 40);
+          atk.moveState.grabbed = null;
+          atk.moveState = null;
+          atk.attackCooldown = 16;
+        } else {
+          // Hold victim in place in front of Greyson
+          victim.vx = 0; victim.vy = 0;
+          victim.x = atk.x + atk.facing * 26;
+          victim.y = atk.y + 2;
+          victim.hitstun = 4;
+          victim.blocking = false;
+        }
+        continue;
+      }
+
+      // Suplex grabbed-phase: drag victim along through lift+slam
+      if (atk.moveState && atk.moveState.type === 'suplex' && atk.moveState.grabbed) {
+        const victim = atk.moveState.grabbed;
+        // Keep victim locked to Kele's position (above him for lift, below for slam)
+        victim.vx = 0; victim.vy = 0;
+        victim.hitstun = 4;
+        victim.blocking = false;
+        if (atk.moveState.phase === 'lift') {
+          // Victim is held overhead
+          victim.x = atk.x;
+          victim.y = atk.y - 40;
+        } else if (atk.moveState.phase === 'slam') {
+          // Victim plummets with Kele, slightly in front
+          victim.x = atk.x + atk.facing * 12;
+          victim.y = atk.y - 20;
+        }
+        continue;
+      }
+
+      const hb = atk.getHitbox();
+      if (!hb) continue;
+
+      // GRABS (cmdGrab + suplex): shield-piercing, doesn't damage directly
+      if (hb.grab) {
+        for (const def of fighters) {
+          if (def === atk || def.respawnTimer > 0 || def.invuln > 0) continue;
+          const dBox = { x: def.x, y: def.y, w: def.w, h: def.h };
+          if (rectsOverlap(hb, dBox)) {
+            // Counter beats grabs
+            if (def.counterActive > 0) {
+              atk.takeDamage(10, -atk.facing * 6, -5, def);
+              spawnEffect(def.cx, def.cy, '#ffffff', 20, 36);
+              def.counterActive = 0;
+              def.counterCooldown = 60;
+              atk.moveState = null;
+              break;
+            }
+            // Shield break
+            if (def.blocking) {
+              spawnEffect(def.cx, def.cy, '#ff6666', 24, 36);
+              def.blocking = false;
+              def.blockCooldown = 30;
+            }
+            atk.moveState.grabbed = def;
+            if (hb.suplex) {
+              // Start suplex sequence
+              atk.moveState.phase = 'lift';
+              atk.moveState.phaseTimer = 0;
+              atk.moveState.timer = 60; // long enough to complete lift+slam
+              spawnEffect(def.cx, def.cy, '#f0d050', 20, 26);
+            } else {
+              // Greyson cmdGrab throw
+              atk.moveState.throwTimer = 18;
+              atk.moveState.timer = 30;
+              spawnEffect(def.cx, def.cy, '#d4c77a', 18, 24);
+            }
+            break;
+          }
+        }
+        continue;
+      }
+
+      for (const def of fighters) {
+        if (def === atk || def.respawnTimer > 0 || def.invuln > 0) continue;
+        if (atk.moveState && atk.moveState.hasHit && atk.moveState.hasHit.has(def)) continue;
+        const dBox = { x: def.x, y: def.y, w: def.w, h: def.h };
+        if (rectsOverlap(hb, dBox)) {
+          // Counter check
+          if (def.counterActive > 0) {
+            const dmg = hb.damage * 1.5;
+            atk.takeDamage(dmg, -hb.kbx * 1.3, -5, def);
+            spawnEffect(def.cx, def.cy, '#ffffff', 20, 36);
+            def.counterActive = 0;
+            def.counterCooldown = 60;
+            atk.moveState = null;
+            break;
+          }
+          def.takeDamage(hb.damage, hb.kbx, hb.kby, atk);
+          if (hb.poison) {
+            def.applyPoison(90);
+            spawnEffect(def.cx, def.cy, '#5aaf3a', 20, 28);
+          }
+          // Uppercut: send victim into free-fall after knockback
+          if (hb.uppercut) {
+            def.helpless = true;
+            spawnEffect(def.cx, def.cy, '#f0d050', 26, 36);
+          }
+          // Track already-hit for multi-frame hitboxes
+          if (atk.moveState && atk.moveState.type && atk.moveState.type.startsWith('atk_')) {
+            atk.moveState.hasHit = atk.moveState.hasHit || new Set();
+            atk.moveState.hasHit.add(def);
+          } else if (atk.moveState && ['toxHeadbutt','toxPunch','hardPunch','powerPunch','uppercut','bodySlam','ultraSpike'].includes(atk.moveState.type)) {
+            atk.moveState.hasHit = atk.moveState.hasHit || new Set();
+            atk.moveState.hasHit.add(def);
+          } else {
+            def.invuln = 8;
+          }
+        }
+      }
+    }
+  }
+
+  // ---------- RENDERING ----------
+  function drawBackdrop() {
+    // Fill the entire screen first (outside the camera transform) — this is the void
+    // outside the stage/blastzone. Fighters falling off will fall into this darkness.
+    ctx.fillStyle = '#0a0a14';
+    ctx.fillRect(0, 0, W, H);
+  }
+
+  function drawStage() {
+    // Background sky — fills the world view area
+    ctx.fillStyle = '#1a1a28';
+    ctx.fillRect(BLAST_LEFT - 200, BLAST_TOP - 200, (BLAST_RIGHT - BLAST_LEFT) + 400, (BLAST_BOTTOM - BLAST_TOP) + 400);
+
+    // Distant mountains at the back
+    ctx.fillStyle = '#232339';
+    ctx.beginPath();
+    ctx.moveTo(BLAST_LEFT - 100, STAGE_TOP);
+    const mStart = BLAST_LEFT - 100;
+    const mEnd = BLAST_RIGHT + 100;
+    const mSteps = 14;
+    for (let i = 0; i <= mSteps; i++) {
+      const x = mStart + (i / mSteps) * (mEnd - mStart);
+      const y = STAGE_TOP - 130 + Math.sin(i * 1.7) * 40 + (i % 2) * 30;
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(mEnd, STAGE_TOP); ctx.closePath(); ctx.fill();
+
+    // Faint guidelines showing the blastzones (only visible if camera zooms out far)
+    ctx.strokeStyle = 'rgba(255, 60, 60, 0.15)';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([10, 8]);
+    ctx.strokeRect(BLAST_LEFT, BLAST_TOP, BLAST_RIGHT - BLAST_LEFT, BLAST_BOTTOM - BLAST_TOP);
+    ctx.setLineDash([]);
+
+    // Platforms
+    for (const p of platforms) {
+      if (p.main) {
+        ctx.fillStyle = '#2f2f48';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#3a3a55';
+        ctx.fillRect(p.x, p.y, p.w, 4);
+        // Grabbable corners — gold highlight
+        ctx.fillStyle = '#d4c77a';
+        ctx.fillRect(p.x - 2, p.y, 4, 8);
+        ctx.fillRect(p.x + p.w - 2, p.y, 4, 8);
+      } else {
+        ctx.fillStyle = '#44446a';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#5a5a82';
+        ctx.fillRect(p.x, p.y, p.w, 2);
+      }
+    }
+
+    // Ledge indicators — small arcs on the stage corners (animated)
+    const t = Date.now() * 0.003;
+    for (const lg of LEDGES) {
+      const pulse = 3 + Math.sin(t) * 2;
+      ctx.strokeStyle = 'rgba(212, 199, 122, 0.4)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(lg.x, lg.y, 10 + pulse, 0, Math.PI, lg.side === -1);
+      ctx.stroke();
+    }
+  }
+
+  // Offstage indicators — arrows at the edge of the screen pointing to fighters that are offscreen
+  function drawOffstageIndicators() {
+    for (const f of fighters) {
+      if (f.respawnTimer > 0 || f.stocks <= 0) continue;
+      // Project fighter world-space position to screen-space
+      const sx = (f.cx - camera.x) * camera.zoom + W / 2;
+      const sy = (f.cy - camera.y) * camera.zoom + H / 2;
+      const margin = 40;
+      if (sx >= margin && sx <= W - margin && sy >= margin && sy <= H - margin) continue;
+      // Clamp arrow position to screen edge
+      const ax = Math.max(margin, Math.min(W - margin, sx));
+      const ay = Math.max(margin, Math.min(H - margin, sy));
+      // Direction from arrow position to actual (offscreen) fighter
+      const dx = sx - ax, dy = sy - ay;
+      const mag = Math.hypot(dx, dy) || 1;
+      const angle = Math.atan2(dy, dx);
+
+      // Background circle
+      ctx.fillStyle = 'rgba(10, 10, 20, 0.85)';
+      ctx.beginPath();
+      ctx.arc(ax, ay, 22, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = f.def.color;
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // Pointer arrow
+      ctx.save();
+      ctx.translate(ax, ay);
+      ctx.rotate(angle);
+      ctx.fillStyle = f.def.color;
+      ctx.beginPath();
+      ctx.moveTo(18, 0);
+      ctx.lineTo(6, -8);
+      ctx.lineTo(6, 8);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+
+      // Player label
+      ctx.fillStyle = '#fff';
+      ctx.font = 'bold 12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(`P${f.index + 1}`, ax, ay + 4);
+      ctx.textAlign = 'left';
+
+      // Distance readout for dramatic offstage moments
+      const distPx = Math.hypot(f.cx - camera.x, f.cy - camera.y);
+      if (distPx > 500) {
+        ctx.fillStyle = '#ff6666';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('!', ax, ay - 16);
+        ctx.textAlign = 'left';
+      }
+    }
+  }
+
+  function drawProjectiles() {
+    for (const p of projectiles) {
+      if (p.type === 'fireball') {
+        const flick = Math.sin(p.wobble) * 2;
+        ctx.fillStyle = '#ffeb3b';
+        ctx.beginPath(); ctx.arc(p.x + p.w/2, p.y + p.h/2, 10 + flick, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#ff6a2a';
+        ctx.beginPath(); ctx.arc(p.x + p.w/2, p.y + p.h/2, 7 + flick, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(p.x + p.w/2 - 2, p.y + p.h/2 - 2, 3, 0, Math.PI*2); ctx.fill();
+      } else if (p.type === 'shuriken') {
+        ctx.save();
+        ctx.translate(p.x + p.w/2, p.y + p.h/2);
+        ctx.rotate(p.spin);
+        ctx.fillStyle = '#cfd8e8';
+        ctx.fillRect(-8, -2, 16, 4);
+        ctx.fillRect(-2, -8, 4, 16);
+        ctx.fillStyle = '#4ab8ff';
+        ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
+      } else if (p.type === 'bolt') {
+        ctx.fillStyle = '#8a6a3a';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#b088ff';
+        const tipX = p.vx > 0 ? p.x + p.w : p.x;
+        ctx.beginPath();
+        ctx.moveTo(tipX, p.y - 2);
+        ctx.lineTo(tipX + (p.vx > 0 ? 6 : -6), p.y + p.h/2);
+        ctx.lineTo(tipX, p.y + p.h + 2);
+        ctx.closePath(); ctx.fill();
+      } else if (p.type === 'beet') {
+        // Magenta beet with green leafy top; spins as it flies
+        p.spin = (p.spin || 0) + 0.3;
+        ctx.save();
+        ctx.translate(p.x + p.w/2, p.y + p.h/2);
+        ctx.rotate(p.spin);
+        // bulb
+        ctx.fillStyle = '#e070b0';
+        ctx.beginPath();
+        ctx.ellipse(0, 0, 5, 4, 0, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = '#a0406a';
+        ctx.beginPath();
+        ctx.ellipse(1, 1, 3, 2, 0, 0, Math.PI*2);
+        ctx.fill();
+        // leafy sprig
+        ctx.strokeStyle = '#a0e0d0';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -4);
+        ctx.lineTo(-1, -7);
+        ctx.moveTo(0, -4);
+        ctx.lineTo(2, -7);
+        ctx.stroke();
+        ctx.restore();
+      } else if (p.type === 'grenade') {
+        // Dark olive sphere with tumbling spin and a visible fuse spark
+        ctx.save();
+        ctx.translate(p.x + p.w/2, p.y + p.h/2);
+        ctx.rotate(p.spin || 0);
+        ctx.fillStyle = '#3a4a2a';
+        ctx.beginPath(); ctx.arc(0, 0, 7, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#6a7a4a';
+        ctx.beginPath(); ctx.arc(-1, -1, 5, 0, Math.PI*2); ctx.fill();
+        // fuse
+        ctx.strokeStyle = '#d4c77a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(0, -7);
+        ctx.lineTo(0, -12);
+        ctx.stroke();
+        ctx.restore();
+        // spark (doesn't rotate with body)
+        const sparkR = 2 + Math.sin(p.life * 0.6) * 1;
+        const sparkColor = p.fuse < 20 ? '#ff4444' : '#ffaa33';
+        ctx.fillStyle = sparkColor;
+        ctx.beginPath();
+        ctx.arc(p.x + p.w/2, p.y + p.h/2 - 12, sparkR, 0, Math.PI*2);
+        ctx.fill();
+      } else if (p.type === 'smoke') {
+        const alpha = 0.35 + Math.sin(p.tick * 0.2) * 0.1;
+        ctx.fillStyle = `rgba(80, 70, 110, ${alpha})`;
+        for (let i = 0; i < 6; i++) {
+          const ox = Math.sin(p.tick * 0.1 + i) * 10;
+          const oy = Math.cos(p.tick * 0.1 + i * 1.3) * 8;
+          ctx.beginPath();
+          ctx.arc(p.x + p.w/2 + ox + (i%3-1)*16, p.y + p.h/2 + oy + (Math.floor(i/3)-0.5)*20,
+                  20 + Math.sin(p.tick * 0.15 + i) * 4, 0, Math.PI*2);
+          ctx.fill();
+        }
+      } else if (p.type === 'poisonLob') {
+        // Purple-green bomb with spin, trailing particles
+        p.spin = (p.spin || 0) + 0.2;
+        ctx.save();
+        ctx.translate(p.x + p.w/2, p.y + p.h/2);
+        ctx.rotate(p.spin);
+        ctx.fillStyle = '#5aaf3a';
+        ctx.fillRect(-8, -8, 16, 16);
+        ctx.fillStyle = '#b6ff6a';
+        ctx.fillRect(-5, -5, 10, 10);
+        ctx.fillStyle = '#2d5c1d';
+        ctx.fillRect(-2, -10, 4, 4);
+        ctx.restore();
+      } else if (p.type === 'poisonCloud') {
+        const alpha = 0.4 + Math.sin(p.tick * 0.2) * 0.15;
+        for (let i = 0; i < 7; i++) {
+          const ox = Math.sin(p.tick * 0.12 + i) * 10;
+          const oy = Math.cos(p.tick * 0.12 + i * 1.3) * 8;
+          ctx.fillStyle = `rgba(90, 175, 58, ${alpha})`;
+          ctx.beginPath();
+          ctx.arc(p.x + p.w/2 + ox + (i%3-1)*18, p.y + p.h/2 + oy + (Math.floor(i/3)-0.5)*20,
+                  18 + Math.sin(p.tick * 0.15 + i) * 4, 0, Math.PI*2);
+          ctx.fill();
+          ctx.fillStyle = `rgba(182, 255, 106, ${alpha * 0.5})`;
+          ctx.beginPath();
+          ctx.arc(p.x + p.w/2 + ox + (i%3-1)*18, p.y + p.h/2 + oy + (Math.floor(i/3)-0.5)*20,
+                  10 + Math.sin(p.tick * 0.15 + i) * 3, 0, Math.PI*2);
+          ctx.fill();
+        }
+      } else if (p.type === 'sporeTrap') {
+        if (p.triggered) {
+          // Burst puff
+          const alpha = Math.max(0, p.life / 30);
+          for (let i = 0; i < 8; i++) {
+            const r = (30 - p.life) * 1.5 + 10;
+            ctx.fillStyle = `rgba(90, 175, 58, ${alpha * 0.6})`;
+            const ang = (i / 8) * Math.PI * 2;
+            ctx.beginPath();
+            ctx.arc(p.x + p.w/2 + Math.cos(ang) * r, p.y + p.h/2 + Math.sin(ang) * r,
+                    14, 0, Math.PI*2);
+            ctx.fill();
+          }
+        } else {
+          // Small mushroom-cluster on the ground
+          const armed = p.armed;
+          const pulse = armed ? Math.sin(p.life * 0.1) * 2 : 0;
+          ctx.fillStyle = armed ? '#5aaf3a' : '#3a5a2a';
+          ctx.fillRect(p.x, p.y, p.w, p.h);
+          ctx.fillStyle = armed ? '#b6ff6a' : '#6a8a4a';
+          // little spore caps
+          for (let i = 0; i < 3; i++) {
+            const cx = p.x + 6 + i * 10;
+            ctx.beginPath();
+            ctx.arc(cx, p.y + 2, 4 + pulse, 0, Math.PI);
+            ctx.fill();
+          }
+          // faint glow ring when armed
+          if (armed) {
+            ctx.strokeStyle = `rgba(182, 255, 106, ${0.3 + Math.sin(p.life * 0.1) * 0.15})`;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.arc(p.x + p.w/2, p.y + p.h/2, 16 + pulse, 0, Math.PI*2);
+            ctx.stroke();
+          }
+        }
+      }
+    }
+  }
+
+  function drawEffects() {
+    for (let i = effects.length - 1; i >= 0; i--) {
+      const e = effects[i];
+      e.life--;
+      const a = e.life / e.maxLife;
+      ctx.globalAlpha = a;
+      ctx.strokeStyle = e.color;
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(e.x, e.y, e.radius * (1 - a * 0.5), 0, Math.PI*2);
+      ctx.stroke();
+      ctx.globalAlpha = 1;
+      if (e.life <= 0) effects.splice(i, 1);
+    }
+  }
+
+  function drawHUD() {
+    for (let i = 0; i < fighters.length; i++) {
+      const f = fighters[i];
+      const baseX = i === 0 ? 40 : W - 260;
+      const y = H - 80;
+
+      ctx.fillStyle = '#22223a';
+      ctx.fillRect(baseX, y, 220, 60);
+      ctx.strokeStyle = f.def.color;
+      ctx.lineWidth = 2;
+      ctx.strokeRect(baseX, y, 220, 60);
+
+      // name
+      ctx.fillStyle = f.def.color;
+      ctx.font = 'bold 14px sans-serif';
+      ctx.fillText(`P${i+1}  ${f.def.name}`, baseX + 10, y + 18);
+
+      // damage %
+      const dmg = Math.floor(f.damage);
+      const dmgColor = dmg < 50 ? '#ffffff' : dmg < 100 ? '#ffeb3b' : dmg < 150 ? '#ff9a2a' : '#ff4444';
+      ctx.fillStyle = dmgColor;
+      ctx.font = 'bold 22px sans-serif';
+      ctx.fillText(`${dmg}%`, baseX + 10, y + 46);
+
+      // stocks
+      for (let s = 0; s < 3; s++) {
+        ctx.fillStyle = s < f.stocks ? f.def.color : '#333';
+        ctx.beginPath();
+        ctx.arc(baseX + 140 + s * 20, y + 40, 6, 0, Math.PI*2);
+        ctx.fill();
+      }
+
+      // Poison status indicator
+      if (f.poisonTimer > 0) {
+        const poisonFrac = f.poisonTimer / 90;
+        ctx.fillStyle = '#2a3a22';
+        ctx.fillRect(baseX + 80, y + 8, 60, 6);
+        ctx.fillStyle = '#5aaf3a';
+        ctx.fillRect(baseX + 80, y + 8, 60 * poisonFrac, 6);
+        ctx.fillStyle = '#b6ff6a';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.fillText('POISONED', baseX + 80, y + 24);
+      }
+    }
+  }
+
+  // ---------- MENU ----------
+  let menuPrevKeys = {};
+
+  function updateMenu() {
+    // Each player chooses independently
+    for (let i = 0; i < 2; i++) {
+      const ctrl = controls[i];
+      const left = keys[ctrl.left] && !menuPrevKeys[ctrl.left];
+      const right = keys[ctrl.right] && !menuPrevKeys[ctrl.right];
+      const special = keys[ctrl.special] && !menuPrevKeys[ctrl.special];
+      const block = keys[ctrl.block] && !menuPrevKeys[ctrl.block];
+
+      if (!menuConfirm[i]) {
+        if (left) menuSel[i] = (menuSel[i] + CHAR_KEYS.length - 1) % CHAR_KEYS.length;
+        if (right) menuSel[i] = (menuSel[i] + 1) % CHAR_KEYS.length;
+        if (special) menuConfirm[i] = true;
+      } else {
+        if (block) menuConfirm[i] = false;
+      }
+    }
+    menuPrevKeys = { ...keys };
+
+    if (keys['Enter'] && menuConfirm[0] && menuConfirm[1]) {
+      startMatch();
+    }
+  }
+
+  function drawMenu() {
+    ctx.fillStyle = '#0f0f18';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = '#ff6a2a';
+    ctx.font = 'bold 48px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText('ALPHA BRAWL', W/2, 80);
+    ctx.fillStyle = '#999';
+    ctx.font = '14px sans-serif';
+    ctx.fillText('Select your fighter', W/2, 108);
+
+    // Dynamic card layout for any roster size
+    const N = CHAR_KEYS.length;
+    let cardW, cardH, gap;
+    if (N >= 6) { cardW = 130; cardH = 200; gap = 10; }
+    else if (N >= 5) { cardW = 150; cardH = 220; gap = 14; }
+    else if (N >= 4) { cardW = 180; cardH = 240; gap = 20; }
+    else { cardW = 200; cardH = 240; gap = 30; }
+    const totalW = N * cardW + (N - 1) * gap;
+    const startX = (W - totalW) / 2 + cardW / 2;
+    const cardCY = 290;
+    const cardPositions = [];
+    for (let c = 0; c < N; c++) {
+      const cx = startX + c * (cardW + gap);
+      cardPositions.push(cx);
+      const ch = CHARS[CHAR_KEYS[c]];
+
+      ctx.fillStyle = '#1a1a28';
+      ctx.fillRect(cx - cardW/2, cardCY - cardH/2, cardW, cardH);
+      ctx.strokeStyle = ch.color;
+      ctx.lineWidth = 3;
+      ctx.strokeRect(cx - cardW/2, cardCY - cardH/2, cardW, cardH);
+
+      // character preview — scale figure to card width
+      const figW = cardW < 170 ? 38 : 48;
+      const figH = cardW < 170 ? 68 : 86;
+      const headW = cardW < 170 ? 22 : 28;
+      const headH = cardW < 170 ? 16 : 20;
+      ctx.fillStyle = ch.color;
+      ctx.fillRect(cx - figW/2, cardCY - 60, figW, figH);
+      ctx.fillStyle = ch.color2;
+      ctx.fillRect(cx - figW/2, cardCY - 34, figW, 10);
+      ctx.fillStyle = '#ffddba';
+      ctx.fillRect(cx - headW/2, cardCY - 72, headW, headH);
+      ctx.fillStyle = '#222';
+      ctx.fillRect(cx + 2, cardCY - 64, 4, 4);
+      ctx.fillRect(cx - 6, cardCY - 64, 4, 4);
+
+      ctx.fillStyle = ch.color;
+      ctx.font = cardW < 170 ? 'bold 16px sans-serif' : 'bold 20px sans-serif';
+      ctx.fillText(ch.name.toUpperCase(), cx, cardCY + 58);
+      ctx.fillStyle = '#ccc';
+      ctx.font = '11px sans-serif';
+      ctx.fillText(ch.archetype, cx, cardCY + 76);
+      // Description wraps to 2 lines on narrow cards
+      ctx.font = cardW < 170 ? '9px sans-serif' : '10px sans-serif';
+      ctx.fillStyle = '#888';
+      if (cardW < 170) {
+        // split description roughly in half at a word boundary
+        const words = ch.description.split(' ');
+        const mid = Math.ceil(words.length / 2);
+        ctx.fillText(words.slice(0, mid).join(' '), cx, cardCY + 92);
+        ctx.fillText(words.slice(mid).join(' '), cx, cardCY + 104);
+      } else {
+        ctx.fillText(ch.description, cx, cardCY + 96);
+      }
+    }
+
+    // selection cursors for P1 above, P2 below
+    for (let i = 0; i < 2; i++) {
+      const cx = cardPositions[menuSel[i]];
+      const label = `P${i+1}`;
+      const color = i === 0 ? '#ff6a2a' : '#4ab8ff';
+      const yOff = i === 0 ? 155 : 445;
+
+      ctx.fillStyle = color;
+      ctx.font = 'bold 15px sans-serif';
+      ctx.fillText(label + (menuConfirm[i] ? ' — READY' : ' — pick'), cx, yOff);
+
+      // underline / frame for selected card
+      ctx.strokeStyle = color;
+      ctx.lineWidth = menuConfirm[i] ? 4 : 3;
+      if (menuConfirm[i]) {
+        // Full frame around confirmed card
+        ctx.strokeRect(cx - cardW/2 - 3, cardCY - cardH/2 - 3, cardW + 6, cardH + 6);
+      } else {
+        // Cursor line above/below the card
+        const lineY = i === 0 ? cardCY - cardH/2 - 6 : cardCY + cardH/2 + 6;
+        ctx.beginPath();
+        ctx.moveTo(cx - 80, lineY);
+        ctx.lineTo(cx + 80, lineY);
+        ctx.stroke();
+      }
+    }
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '11px sans-serif';
+    ctx.fillText('P1: A/D cycle, F confirm, L-Shift cancel      P2: ←/→ cycle, L confirm, R-Shift cancel', W/2, H - 55);
+    ctx.fillStyle = (menuConfirm[0] && menuConfirm[1]) ? '#4ab8ff' : '#555';
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(menuConfirm[0] && menuConfirm[1] ? 'Press ENTER to fight!' : 'Both players must confirm', W/2, H - 32);
+
+    // Move list hint
+    ctx.font = '10px monospace';
+    ctx.fillStyle = '#666';
+    ctx.textAlign = 'left';
+    const hints = [
+      'Nico    (Rushdown):    neutral→Fireball     side→Burn Dash    up→Fire Propel  down→Counter',
+      'Derek   (Zoner):       neutral→Shuriken     side→Crossbow     up→Katana Dash  down→Smoke Bomb',
+      'Rhys    (Trapper):     neutral→Tox Headbutt side→Tox Punch    up→Poison Lob   down→Spore Trap  · specials poison 1.5s',
+      'Greyson (Hybrid):      neutral→Grenade      side→Hard Punch   up→Mega Jump    down→Cmd Grab  · grab pierces shield',
+      'Kele    (Heavyweight): neutral→Power Punch  side→Suplex       up→Uppercut     down→Body Slam · slow, huge damage',
+      'Jonah   (Flier):       neutral→Beet Blast   side→Mach 5       up→Glide        down→Ultra Spike · 5 jumps, floaty',
+    ];
+    ctx.fillText(hints[0], 30, H - 175);
+    ctx.fillText(hints[1], 30, H - 160);
+    ctx.fillText(hints[2], 30, H - 145);
+    ctx.fillText(hints[3], 30, H - 130);
+    ctx.fillText(hints[4], 30, H - 115);
+    ctx.fillText(hints[5], 30, H - 100);
+    ctx.textAlign = 'left';
+  }
+
+  // ---------- GAME OVER ----------
+  function drawGameOver() {
+    ctx.fillStyle = 'rgba(10, 10, 20, 0.85)';
+    ctx.fillRect(0, 0, W, H);
+
+    ctx.fillStyle = winner.def.color;
+    ctx.font = 'bold 52px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`${winner.def.name.toUpperCase()} WINS!`, W/2, H/2 - 20);
+
+    ctx.fillStyle = '#fff';
+    ctx.font = '18px sans-serif';
+    ctx.fillText(`Player ${winner.index + 1} takes the round`, W/2, H/2 + 16);
+
+    ctx.fillStyle = '#aaa';
+    ctx.font = '14px sans-serif';
+    ctx.fillText('Press ENTER to return to character select', W/2, H/2 + 60);
+    ctx.textAlign = 'left';
+  }
+
+  // ---------- MAIN LOOP ----------
+  function loop() {
+    if (state === STATE.MENU) {
+      drawMenu();
+      updateMenu();
+    } else if (state === STATE.PLAY) {
+      // update
+      for (const f of fighters) f.update();
+      updateProjectiles();
+      resolveMelee();
+      updateCamera();
+
+      // check victory
+      const alive = fighters.filter(f => f.stocks > 0);
+      if (alive.length === 1 && !winner) {
+        winner = alive[0];
+        state = STATE.OVER;
+      }
+
+      // render
+      drawBackdrop();
+      applyCamera();
+      drawStage();
+      drawProjectiles();
+      for (const f of fighters) f.render(ctx);
+      drawEffects();
+      releaseCamera();
+      drawOffstageIndicators();
+      drawHUD();
+    } else if (state === STATE.OVER) {
+      drawBackdrop();
+      applyCamera();
+      drawStage();
+      drawProjectiles();
+      for (const f of fighters) if (f.stocks > 0) f.render(ctx);
+      drawEffects();
+      releaseCamera();
+      drawOffstageIndicators();
+      drawHUD();
+      drawGameOver();
+
+      if (keys['Enter']) {
+        state = STATE.MENU;
+        menuConfirm = [false, false];
+        winner = null;
+      }
+    }
+
+    requestAnimationFrame(loop);
+  }
+
+  loop();
+})();
+</script>
