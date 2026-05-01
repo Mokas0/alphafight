@@ -6,7 +6,7 @@ Drop `index.html` into any browser or static host and play.
 
 ## Status
 
-Playable prototype. Local 2-player only (shared keyboard). Seven characters, full move sets,
+Playable prototype. Local 2-player only (shared keyboard). Eight characters, full move sets,
 camera tracking, ledge recoveries, and stock-based matches.
 
 ## Quick start
@@ -39,7 +39,7 @@ down air — down air is a spike).
 
 ## Roster
 
-Seven characters with distinct archetypes. All have four directional specials, ground tilts
+Eight characters with distinct archetypes. All have four directional specials, ground tilts
 (jab/forward/up/down) and full aerials. Stats below are relative.
 
 ### Nico — Rushdown (orange/yellow)
@@ -92,6 +92,15 @@ Medium stats, battlefield-control specialist with dark-energy tools.
 - **Side**: Power Blast (energy rifle shot — laser projectile + close-range bayonet thrust; both connect at point-blank)
 - **Up**: Teleport (vanishes briefly, reappears 200px in the directional key pressed; helpless after if airborne)
 - **Down**: Absorb (consumes incoming projectiles within 80px and converts their damage into healing at 1.2×)
+
+### Cole — Pyromaniac (coal-black/orange)
+Medium stats with a **fuel meter** (0–100, regenerates ~0.4/frame on the ground, ~0.2/frame airborne)
+that gates his rocket boost and gasoline spray. Gas + ignite is the combo identity.
+- **Neutral**: Ignite (close-range fire burst, 7 dmg base; **+14 bonus** vs gasoline-doused enemies. Also lights any gasoline puddles in 90px radius into fire patches.)
+- **Side**: Gasoline Spray (costs 25 fuel; lobbed oil arc — direct hit douses an enemy with the *fueled* status; misses land as a 360-frame puddle that douses anyone who walks through it)
+- **Up**: Rocket Boost (hold special to thrust upward, drains 0.34 fuel/frame ≈ 5s at full tank; steerable left/right, 14f endlag on landing, helpless if airborne when fuel runs dry)
+- **Down**: Molotov (lobbed bottle, 8 dmg direct; on impact spawns a 100-frame fire patch that ticks 1.4 dmg every 12f. Direct hits also apply *fueled*.)
+- **Fueled** status (4s) is shared across the kit — anything that ignites it (Ignite hitbox or Fire Patch tick) deals bonus damage and clears the status.
 
 ## Core mechanics
 
