@@ -2170,8 +2170,10 @@
               greyson: { main: '#6a7a4a', hot: '#d4c77a' },
               kele: { main: '#a34040', hot: '#f0d050' },
               jonah: { main: '#e070b0', hot: '#a0e0d0' },
+              theo: { main: '#8a4ade', hot: '#4ad7e8' },
+              cole: { main: '#ff8a3a', hot: '#ffeb3b' },
             };
-            const { main: mainColor, hot: hotColor } = palettes[this.key];
+            const { main: mainColor, hot: hotColor } = palettes[this.key] || { main: '#ffffff', hot: '#ffffff' };
             // filled swipe shape
             ctx.fillStyle = mainColor;
             ctx.globalAlpha = 0.55;
