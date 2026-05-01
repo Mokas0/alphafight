@@ -96,7 +96,7 @@ Medium stats, battlefield-control specialist with dark-energy tools.
 ### Cole — Pyromaniac (coal-black/orange)
 Medium stats with a **fuel meter** (0–100, regenerates ~0.4/frame on the ground, ~0.2/frame airborne)
 that gates his rocket boost and gasoline spray. Gas + ignite is the combo identity.
-- **Neutral**: Ignite (close-range fire burst, 7 dmg base; **+14 bonus** vs gasoline-doused enemies. Also lights any gasoline puddles in 90px radius into fire patches.)
+- **Neutral**: Igniter Toss (lobs a small sparking device forward in an arc, 7 dmg on direct hit. On impact — ground or enemy — the device sparks: it lights any gasoline puddle within 80 px into a fire patch and detonates **any** fueled enemy in the splash for +14 bonus damage. Direct hits on a fueled target also get the bonus.)
 - **Side**: Gasoline Spray (costs 25 fuel; lobbed oil arc — direct hit douses an enemy with the *fueled* status; misses land as a 360-frame puddle that douses anyone who walks through it)
 - **Up**: Rocket Boost (hold special to thrust upward, drains 0.34 fuel/frame ≈ 5s at full tank; steerable left/right, 14f endlag on landing, helpless if airborne when fuel runs dry)
 - **Down**: Molotov (lobbed bottle, 8 dmg direct; on impact spawns a 100-frame fire patch that ticks 1.4 dmg every 12f. Direct hits also apply *fueled*.)

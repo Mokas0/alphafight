@@ -802,9 +802,20 @@
     // Fuel regenerates ~0.3/frame when Cole isn't actively spending it.
     coleSpecial(dir) {
       if (dir === 'neutral') {
-        // Ignite — small radius fire burst. Bonus damage on fueled enemies; ignites puddles.
-        this.moveState = { type: 'ignite', timer: 26, active: [6, 16], hasHit: null };
-        this.attackCooldown = 22;
+        // Igniter — Cole throws a sparking device forward in a light arc. On impact
+        // (ground or fighter) it bursts, lighting any gasoline puddle within 80px into a
+        // fire patch and detonating any fueled enemies in the splash for bonus damage.
+        this.moveState = { type: 'igniter', timer: 22 };
+        const fwd = this.facing;
+        setTimeout(() => {
+          projectiles.push({
+            owner: this, x: this.cx + fwd * 18, y: this.cy - 6,
+            vx: fwd * 8, vy: -5, w: 12, h: 10,
+            life: 80, damage: 7, kbx: fwd * 4, kby: -3,
+            type: 'igniter', gravity: 0.45, spin: 0,
+          });
+        }, 100);
+        this.attackCooldown = 18;
       } else if (dir === 'up') {
         // Rocket Boost — only triggers if there's any fuel left.
         if (this.fuel < 4) {
@@ -1113,32 +1124,6 @@
         // Rhys: Poison Lob windup
         if (this.moveState && this.moveState.type === 'poisonLob' && this.moveState.timer > 12) {
           if (Math.random() < 0.4) spawnEffect(this.cx, this.y - 6, '#b6ff6a', 10, 6);
-        }
-        // Cole: Ignite — during active frames, convert nearby gasoline puddles to fire patches.
-        if (this.moveState && this.moveState.type === 'ignite') {
-          const elapsed = 26 - this.moveState.timer;
-          if (elapsed >= 6 && elapsed <= 16) {
-            const radius = 90;
-            for (const p of projectiles) {
-              if (p.type !== 'gasolinePuddle' || p.ignited) continue;
-              const px = p.x + p.w/2, py = p.y + p.h/2;
-              if (Math.hypot(px - this.cx, py - this.cy) > radius) continue;
-              // Convert in place
-              p.type = 'firePatch';
-              p.ignited = true;
-              p.life = Math.max(p.life, 90);
-              p.tick = 0;
-              p.hitCooldowns = new Map();
-              p.damage = 1.2;
-              spawnEffect(px, py, '#ffaa33', 22, 36);
-              spawnEffect(px, py, '#ff6a2a', 18, 40);
-            }
-            // Also light up Cole's own visible flame burst
-            if (Math.random() < 0.6) {
-              spawnEffect(this.cx + (Math.random()-0.5)*40, this.cy + (Math.random()-0.5)*30,
-                          Math.random() < 0.5 ? '#ffeb3b' : '#ff6a2a', 14, 14);
-            }
-          }
         }
         // Cole: Rocket Boost — sustained upward thrust while special key held; drains fuel.
         if (this.moveState && this.moveState.type === 'rocketBoost') {
@@ -1516,14 +1501,6 @@
         return { x: this.facing === 1 ? this.x + this.w - 4 : this.x - 34,
                  y: this.y + 6, w: 38, h: this.h - 12,
                  damage: 0, kbx: 0, kby: 0, type: 'grab', grab: true, suplex: true };
-      }
-      // Cole: Ignite — fire burst around Cole. Bonus damage flag for fueled targets.
-      if (t === 'ignite') {
-        const elapsed = 26 - this.moveState.timer;
-        const [a, b] = this.moveState.active;
-        if (elapsed < a || elapsed > b) return null;
-        return { x: this.x - 26, y: this.y + 4, w: this.w + 52, h: this.h - 8,
-                 damage: 7, kbx: this.facing * 4, kby: -4, type: 'fire', ignite: true };
       }
       // Theo: Power Blast — bayonet melee in front. Close-range thrust window only.
       if (t === 'powerBlast') {
@@ -3070,43 +3047,47 @@
             }
           }
         }
-        // Ignite — radial fire burst centered on Cole
-        if (t === 'ignite') {
-          const elapsed = 26 - this.moveState.timer;
-          if (elapsed >= 4) {
-            const tFrac = Math.min(1, (elapsed - 4) / 12);
-            const r = 14 + tFrac * 30;
-            // Outer ring
-            ctx.fillStyle = `rgba(163, 64, 64, ${0.5 - tFrac * 0.3})`;
+        // Igniter throw — cocked-back arm with sparking igniter, then follow-through
+        if (t === 'igniter') {
+          const elapsed = 22 - this.moveState.timer;
+          const fwd = this.facing;
+          // Projectile spawns at ~6 frames; before that, arm is back with the device.
+          if (elapsed < 6) {
+            const palmX = this.cx - fwd * 12;
+            const palmY = this.cy - 6;
+            // Arm pulled back
+            ctx.strokeStyle = '#ffddba';
+            ctx.lineWidth = 3;
             ctx.beginPath();
-            ctx.arc(this.cx, this.cy, r, 0, Math.PI*2);
-            ctx.fill();
-            // Mid orange
-            ctx.fillStyle = `rgba(255, 106, 42, ${0.75 - tFrac * 0.4})`;
+            ctx.moveTo(this.cx, this.cy - 2);
+            ctx.lineTo(palmX, palmY);
+            ctx.stroke();
+            // Igniter device — small dark box
+            ctx.fillStyle = '#222222';
+            ctx.fillRect(palmX - 4, palmY - 3, 8, 7);
+            ctx.fillStyle = '#ff8a3a';
+            ctx.fillRect(palmX - 3, palmY - 2, 2, 2);
+            // Spark above the device
+            ctx.fillStyle = '#ffeb3b';
+            const sparkR = 1.5 + Math.sin(elapsed) * 0.7;
             ctx.beginPath();
-            ctx.arc(this.cx, this.cy, r * 0.75, 0, Math.PI*2);
+            ctx.arc(palmX + 2, palmY - 5 + Math.sin(elapsed * 1.5) * 1.5, sparkR, 0, Math.PI*2);
             ctx.fill();
-            // Inner yellow-white core
-            ctx.fillStyle = `rgba(255, 235, 59, ${0.9 - tFrac * 0.6})`;
-            ctx.beginPath();
-            ctx.arc(this.cx, this.cy, r * 0.45, 0, Math.PI*2);
-            ctx.fill();
-            // Radial spark spokes
-            ctx.strokeStyle = `rgba(255, 235, 59, ${0.7 - tFrac * 0.5})`;
-            ctx.lineWidth = 2;
-            for (let k = 0; k < 8; k++) {
-              const ang = k * (Math.PI / 4) + this.animTick * 0.05;
-              ctx.beginPath();
-              ctx.moveTo(this.cx + Math.cos(ang) * r * 0.4, this.cy + Math.sin(ang) * r * 0.4);
-              ctx.lineTo(this.cx + Math.cos(ang) * r * 1.1, this.cy + Math.sin(ang) * r * 1.1);
-              ctx.stroke();
-            }
           } else {
-            // Windup: a charging spark in Cole's palm
-            ctx.fillStyle = `rgba(255, 235, 59, ${0.5 + elapsed * 0.1})`;
+            // Follow-through: arm extended forward
+            ctx.strokeStyle = '#ffddba';
+            ctx.lineWidth = 3;
             ctx.beginPath();
-            ctx.arc(this.cx + this.facing * 14, this.cy - 4, 2 + elapsed * 0.6, 0, Math.PI*2);
-            ctx.fill();
+            ctx.moveTo(this.cx, this.cy - 2);
+            ctx.lineTo(this.cx + fwd * 18, this.cy - 8);
+            ctx.stroke();
+            // Lingering spark at fingertips
+            if (elapsed < 12) {
+              ctx.fillStyle = `rgba(255, 235, 59, ${0.7 - (elapsed - 6) / 12})`;
+              ctx.beginPath();
+              ctx.arc(this.cx + fwd * 18, this.cy - 8, 2, 0, Math.PI*2);
+              ctx.fill();
+            }
           }
         }
         // Molotov — windup with bottle in raised hand, lit fuse
@@ -3265,6 +3246,46 @@
     }
   }
 
+  // Cole's igniter spark: lights gasoline puddles in radius into fire patches and
+  // detonates fueled enemies in radius for bonus damage. Called from both ground impact
+  // and fighter direct hits so the splash AoE behaves consistently.
+  function igniterSpark(cx, cy, owner, radius) {
+    spawnEffect(cx, cy, '#ffeb3b', 22, 30);
+    spawnEffect(cx, cy, '#ff6a2a', 18, 36);
+    // Ignite gasoline puddles in radius
+    for (const q of projectiles) {
+      if (q.type !== 'gasolinePuddle' || q.ignited) continue;
+      const qx = q.x + q.w/2, qy = q.y + q.h/2;
+      if (Math.hypot(qx - cx, qy - cy) > radius) continue;
+      q.type = 'firePatch';
+      q.ignited = true;
+      q.life = Math.max(q.life, 90);
+      q.tick = 0;
+      q.hitCooldowns = new Map();
+      q.damage = 1.2;
+      spawnEffect(qx, qy, '#ff6a2a', 18, 30);
+    }
+    // Detonate fueled fighters caught in the splash
+    for (const f of fighters) {
+      if (f === owner) continue;
+      if (f.respawnTimer > 0 || f.invuln > 0) continue;
+      if (f.fueled <= 0) continue;
+      const dx = f.cx - cx, dy = f.cy - cy;
+      if (Math.hypot(dx, dy) > radius) continue;
+      f.fueled = 0;
+      // Counter check (igniter splash is still an attack from owner)
+      if (f.counterActive > 0) {
+        owner.takeDamage(14 * 1.5, dx > 0 ? -8 : 8, -5, f);
+        spawnEffect(f.cx, f.cy, '#ffffff', 20, 36);
+        f.counterActive = 0; f.counterCooldown = 60;
+        continue;
+      }
+      const dir = Math.hypot(dx, dy) < 1 ? 1 : 1 / Math.hypot(dx, dy);
+      f.takeDamage(14, dx * dir * 5, Math.min(-3, (dy - 16) * dir * 5), owner);
+      spawnEffect(f.cx, f.cy, '#ffeb3b', 28, 40);
+    }
+  }
+
   function updateProjectiles() {
     for (let i = projectiles.length - 1; i >= 0; i--) {
       const p = projectiles[i];
@@ -3306,8 +3327,9 @@
         if (p.armTimer <= 0) p.armed = true;
       }
 
-      // Cole projectiles: molotov spin, fire patch ignites adjacent gasoline puddles
+      // Cole projectiles: molotov + igniter spin, fire patch ignites adjacent gasoline puddles
       if (p.type === 'molotov') p.spin = (p.spin || 0) + 0.4;
+      if (p.type === 'igniter') p.spin = (p.spin || 0) + 0.55;
       if (p.type === 'firePatch') {
         // Spread to any gasoline puddles we overlap each frame
         for (const q of projectiles) {
@@ -3361,6 +3383,10 @@
           });
           spawnEffect(p.x + p.w/2, GROUND_Y, '#ffeb3b', 22, 36);
           spawnEffect(p.x + p.w/2, GROUND_Y, '#ff6a2a', 20, 44);
+          p.life = 0;
+        } else if (p.type === 'igniter') {
+          // Spark on ground impact — light puddles + detonate fueled enemies in splash
+          igniterSpark(p.x + p.w/2, GROUND_Y - 4, p.owner, 80);
           p.life = 0;
         } else {
           p.life = 0;
@@ -3431,6 +3457,26 @@
             // Spray particle directly hits an enemy — apply fueled, no damage, despawn.
             f.applyFuel(240);
             spawnEffect(f.cx, f.cy, '#5a4028', 18, 22);
+            p.life = 0;
+            break;
+          } else if (p.type === 'igniter') {
+            // Direct hit on a fighter — counter check, damage + bonus on fueled, then splash.
+            if (f.counterActive > 0) {
+              p.owner.takeDamage(p.damage * 1.5, -p.vx * 1.5, -4, f);
+              spawnEffect(f.cx, f.cy, '#ffffff', 20, 36);
+              f.counterActive = 0; f.counterCooldown = 60;
+              p.life = 0;
+              break;
+            }
+            let dmg = p.damage;
+            if (f.fueled > 0) {
+              dmg += 14;
+              f.fueled = 0;
+              spawnEffect(f.cx, f.cy, '#ffeb3b', 28, 40);
+            }
+            f.takeDamage(dmg, p.kbx, p.kby, p.owner);
+            // Splash: light any gasoline puddles + detonate other fueled fighters in radius
+            igniterSpark(p.x + p.w/2, p.y + p.h/2, p.owner, 80);
             p.life = 0;
             break;
           }
@@ -3588,18 +3634,7 @@
             atk.moveState = null;
             break;
           }
-          // Ignite bonus: Cole's ignite does +14 damage and stronger knockback
-          // against gasoline-doused (fueled) opponents. Clears the fueled status on hit.
-          let dmg = hb.damage, kbxF = hb.kbx, kbyF = hb.kby;
-          if (hb.ignite && def.fueled > 0) {
-            dmg += 14;
-            kbxF *= 1.6;
-            kbyF *= 1.4;
-            def.fueled = 0;
-            spawnEffect(def.cx, def.cy, '#ffeb3b', 32, 50);
-            spawnEffect(def.cx, def.cy, '#ff6a2a', 26, 60);
-          }
-          def.takeDamage(dmg, kbxF, kbyF, atk);
+          def.takeDamage(hb.damage, hb.kbx, hb.kby, atk);
           if (hb.poison) {
             def.applyPoison(90);
             spawnEffect(def.cx, def.cy, '#5aaf3a', 20, 28);
@@ -3613,7 +3648,7 @@
           if (atk.moveState && atk.moveState.type && atk.moveState.type.startsWith('atk_')) {
             atk.moveState.hasHit = atk.moveState.hasHit || new Set();
             atk.moveState.hasHit.add(def);
-          } else if (atk.moveState && ['toxHeadbutt','toxPunch','hardPunch','powerPunch','uppercut','bodySlam','ultraSpike','powerBlast','ignite'].includes(atk.moveState.type)) {
+          } else if (atk.moveState && ['toxHeadbutt','toxPunch','hardPunch','powerPunch','uppercut','bodySlam','ultraSpike','powerBlast'].includes(atk.moveState.type)) {
             atk.moveState.hasHit = atk.moveState.hasHit || new Set();
             atk.moveState.hasHit.add(def);
           } else {
@@ -3957,6 +3992,39 @@
                   3 + Math.random() * 2, 0, Math.PI*2);
           ctx.fill();
         }
+      } else if (p.type === 'igniter') {
+        // Tumbling sparker — small black box with bright yellow spark trail
+        const cx = p.x + p.w/2, cy = p.y + p.h/2;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(p.spin || 0);
+        // Body
+        ctx.fillStyle = '#222222';
+        ctx.fillRect(-5, -3, 10, 7);
+        // Orange button stripe
+        ctx.fillStyle = '#ff8a3a';
+        ctx.fillRect(-4, -2, 3, 2);
+        // Metal nozzle nub
+        ctx.fillStyle = '#888888';
+        ctx.fillRect(2, -4, 3, 2);
+        ctx.restore();
+        // Spark on top (doesn't rotate so it always points up)
+        const sparkR = 2 + Math.sin(p.life * 0.5) * 0.8;
+        ctx.fillStyle = '#ffeb3b';
+        ctx.beginPath();
+        ctx.arc(cx + 2, cy - 5, sparkR, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(cx + 2, cy - 5, sparkR * 0.5, 0, Math.PI*2);
+        ctx.fill();
+        // Trailing spark fizz behind motion vector
+        if (Math.random() < 0.7) {
+          ctx.fillStyle = `rgba(255, 235, 59, 0.7)`;
+          ctx.beginPath();
+          ctx.arc(cx - p.vx * 0.5, cy - p.vy * 0.5, 1.5, 0, Math.PI*2);
+          ctx.fill();
+        }
       } else if (p.type === 'molotov') {
         // Glass bottle with flame on top, tumbling
         ctx.save();
@@ -4256,7 +4324,7 @@
       'Kele    (Heavyweight): neutral→Power Punch  side→Suplex       up→Uppercut     down→Body Slam · slow, huge damage',
       'Jonah   (Flier):       neutral→Beet Blast   side→Mach 5       up→Glide        down→Ultra Spike · 5 jumps, floaty',
       'Theo    (Controller):  neutral→Charge Bomb  side→Power Blast  up→Teleport     down→Absorb · absorb heals from projectiles',
-      'Cole    (Pyromaniac):  neutral→Ignite       side→Gasoline     up→Rocket Boost down→Molotov   · fuel meter; gas + ignite combo',
+      'Cole    (Pyromaniac):  neutral→Igniter Toss side→Gasoline     up→Rocket Boost down→Molotov   · fuel meter; gas + igniter combo',
     ];
     for (let hi = 0; hi < hints.length; hi++) {
       ctx.fillText(hints[hi], 30, H - 205 + hi * 15);
