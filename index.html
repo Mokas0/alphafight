@@ -3340,9 +3340,11 @@
       netPending.guestChar = msg.char;
       net.statusText = 'guest: ' + msg.char + ' — press ENTER to start';
     } else if (msg.t === 'startMatch') {
-      // Coordinated start signal from host
-      if (net.mode === 'guest' && netReadyToStart()) {
-        beginNetMatch();
+      // Coordinated start signal from host. Picks up the freshly generated
+      // seed for this match (rematches use a new seed each time).
+      if (net.mode === 'guest') {
+        if (msg.seed != null && netPending) netPending.seed = msg.seed;
+        if (netReadyToStart()) beginNetMatch();
       }
     } else if (msg.t === 'input') {
       net.remoteBuf.set(msg.frame, msg.mask);
@@ -4516,11 +4518,22 @@
           if (tap(ctrl.right)) menuSel[i] = (menuSel[i] + 1) % CHAR_KEYS.length;
           if (tap(ctrl.special)) {
             menuConfirm[i] = true;
-            // First confirm on net side opens the connection.
-            if (net.mode === 'host' && !net.peer) {
-              startHost(CHAR_KEYS[menuSel[0]]);
-            } else if (net.mode === 'guest' && !net.peer) {
-              startGuest(net.roomCode, CHAR_KEYS[menuSel[1]]);
+            // First confirm in net mode opens the connection. On rematch (peer
+            // already exists), instead push our latest char selection to the peer.
+            if (net.mode === 'host') {
+              if (!net.peer) {
+                startHost(CHAR_KEYS[menuSel[0]]);
+              } else if (net.conn && netPending) {
+                netPending.hostChar = CHAR_KEYS[menuSel[0]];
+                try { net.conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed }); } catch (e) {}
+              }
+            } else if (net.mode === 'guest') {
+              if (!net.peer) {
+                startGuest(net.roomCode, CHAR_KEYS[menuSel[1]]);
+              } else if (net.conn && netPending) {
+                netPending.guestChar = CHAR_KEYS[menuSel[1]];
+                try { net.conn.send({ t: 'guestChar', char: netPending.guestChar }); } catch (e) {}
+              }
             }
           }
         } else if (tap(ctrl.block)) {
@@ -4543,7 +4556,10 @@
       } else if (net.mode === 'host') {
         // Host needs both chars + connection, then ENTER to start.
         if (tap('Enter') && menuConfirm[0] && netReadyToStart()) {
-          try { net.conn && net.conn.send({ t: 'startMatch' }); } catch (e) {}
+          // Fresh seed per match so RNG outcomes (e.g. Jonah pellet spread)
+          // don't repeat in a rematch.
+          netPending.seed = (Math.random() * 0x7fffffff) | 0;
+          try { net.conn && net.conn.send({ t: 'startMatch', seed: netPending.seed }); } catch (e) {}
           beginNetMatch();
         }
       } else {
@@ -4626,9 +4642,11 @@
     if (net.mode === 'local') {
       ctx.fillText('Select your fighters', W/2, 108);
     } else if (net.mode === 'host') {
-      ctx.fillText('Hosting — pick your fighter', W/2, 108);
+      const inLobby = net.connected;
+      ctx.fillText(inLobby ? 'Lobby — pick your fighter for next match' : 'Hosting — pick your fighter', W/2, 108);
     } else {
-      ctx.fillText('Joining ' + net.roomCode + ' — pick your fighter', W/2, 108);
+      const inLobby = net.connected;
+      ctx.fillText(inLobby ? 'Lobby (room ' + net.roomCode + ') — pick your fighter' : 'Joining ' + net.roomCode + ' — pick your fighter', W/2, 108);
     }
 
     // Dynamic card layout for any roster size
@@ -4813,7 +4831,14 @@
 
     ctx.fillStyle = '#aaa';
     ctx.font = '14px sans-serif';
-    ctx.fillText('Press ENTER to return to character select', W/2, H/2 + 60);
+    if (net.mode !== 'local' && net.connected) {
+      ctx.fillText('Press ENTER for rematch  ·  ESC to leave the lobby', W/2, H/2 + 60);
+      ctx.fillStyle = '#888';
+      ctx.font = '12px sans-serif';
+      ctx.fillText('ROOM ' + net.roomCode, W/2, H/2 + 84);
+    } else {
+      ctx.fillText('Press ENTER to return to character select', W/2, H/2 + 60);
+    }
     ctx.textAlign = 'left';
   }
 
@@ -4951,12 +4976,22 @@
       drawNetOverlay();
       drawGameOver();
       if (keys['Enter']) {
-        state = STATE.MENU;
-        menuConfirm = [false, false];
-        winner = null;
-        menuStage = 'mode';
-        netCleanup();
-        net.mode = 'local';
+        if (net.mode !== 'local' && net.connected) {
+          // Lobby: stay connected, drop back into character select for a rematch.
+          state = STATE.MENU;
+          menuStage = 'chars';
+          menuConfirm = [false, false];
+          winner = null;
+          menuPrevKeys = { ...keys }; // suppress edge-detection re-trigger of Enter on next frame
+        } else {
+          // Local mode (or net connection died): full reset to mode select.
+          state = STATE.MENU;
+          menuConfirm = [false, false];
+          winner = null;
+          menuStage = 'mode';
+          netCleanup();
+          net.mode = 'local';
+        }
       }
     }
     if (keys['Escape'] && state !== STATE.MENU) {
@@ -4966,6 +5001,26 @@
       winner = null;
       netCleanup();
       net.mode = 'local';
+    }
+    // Connection loss in net mode while in PLAY/lobby — bail to mode select.
+    if (net.mode !== 'local' && !net.connected && state !== STATE.MENU) {
+      state = STATE.MENU;
+      menuConfirm = [false, false];
+      menuStage = 'mode';
+      winner = null;
+      net.error = net.error || 'peer disconnected';
+      netCleanup();
+      net.mode = 'local';
+    }
+    // Same for the lobby: if we're in chars stage in net mode and connection dropped, bail.
+    if (net.mode !== 'local' && state === STATE.MENU && menuStage === 'chars' && !net.connected) {
+      menuStage = 'mode';
+      menuConfirm = [false, false];
+      net.error = net.error || 'peer disconnected';
+      const oldRoom = net.roomCode;
+      netCleanup();
+      net.mode = 'local';
+      net.roomCode = oldRoom; // keep so user can see what room they were in (purely informational)
     }
   }
 
