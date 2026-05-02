@@ -6,8 +6,28 @@ Drop `index.html` into any browser or static host and play.
 
 ## Status
 
-Playable prototype. Local 2-player only (shared keyboard). Eight characters, full move sets,
-camera tracking, ledge recoveries, and stock-based matches.
+Playable prototype. Local 2-player (shared keyboard) **and** online 2-player over WebRTC,
+with eight characters, full move sets, camera tracking, ledge recoveries, and stock-based
+matches.
+
+## Online play
+
+The title screen has three modes: **LOCAL 2P**, **HOST ONLINE**, **JOIN ONLINE**.
+Online uses peer-to-peer WebRTC via the public PeerJS signaling server (no backend needed
+on your end), with deterministic lockstep netcode and a 3-frame input delay buffer.
+
+- **Host**: pick HOST, confirm your fighter, share the 6-char room code with a friend.
+- **Join**: pick JOIN, type the 6-char code, confirm your fighter. The host then presses
+  ENTER to start the match.
+- **ESC** in any state returns to the main menu and tears down the connection.
+
+Online play needs the page hosted on a real URL (Netlify Drop / GitHub Pages) — the
+PeerJS CDN won't load reliably from `file://`. NAT traversal usually succeeds for ~80% of
+home networks; a TURN relay would be needed for the rest (out of scope).
+
+The match status overlay in the top-right shows connection state, current frame, and
+desync warnings. State hashes are exchanged every 60 frames; if they diverge, the overlay
+flags `DESYNC @ frameN` so you know to restart.
 
 ## Quick start
 

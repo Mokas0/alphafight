@@ -9,6 +9,8 @@
   h1 span { color: #4ab8ff; }
 </style>
 
+<script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
 <div id="wrap">
   <h1>ALPHA <span>BRAWL</span></h1>
   <canvas id="game" width="960" height="540"></canvas>
@@ -222,6 +224,35 @@
   const projectiles = [];
   const effects = [];
 
+  // Frame-counter spawn queue. Replaces setTimeout for any gameplay-affecting
+  // delayed action (projectile spawns after windups). Required for deterministic
+  // simulation under lockstep netcode — wall-clock setTimeout fires unpredictably
+  // relative to the frame loop and would desync clients.
+  const pendingSpawns = [];
+  function delaySpawn(frames, fn) { pendingSpawns.push({ framesLeft: frames, fn }); }
+  function tickPendingSpawns() {
+    for (let i = pendingSpawns.length - 1; i >= 0; i--) {
+      const s = pendingSpawns[i];
+      s.framesLeft--;
+      if (s.framesLeft <= 0) {
+        try { s.fn(); } catch (e) { /* swallow per-spawn errors */ }
+        pendingSpawns.splice(i, 1);
+      }
+    }
+  }
+
+  // Seeded RNG — mulberry32. Used wherever Math.random would affect gameplay
+  // state (projectile pellet speeds, etc.). Visual-only randomness can stay on
+  // Math.random; only state-affecting calls go through here.
+  let rngState = 0x9e3779b9;
+  function rng() {
+    let t = (rngState += 0x6d2b79f5) | 0;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  }
+  function rngSeed(s) { rngState = (s | 0) || 0x9e3779b9; }
+
   function spawnEffect(x, y, color, life = 20, radius = 14) {
     effects.push({ x, y, color, life, maxLife: life, radius });
   }
@@ -338,13 +369,13 @@
     handleInput() {
       if (this.hitstun > 0 || this.respawnTimer > 0 || this.endlag > 0) return;
       const ctrl = controls[this.index];
-      const left = keys[ctrl.left];
-      const right = keys[ctrl.right];
-      const up = keys[ctrl.up];
-      const down = keys[ctrl.down];
-      const block = keys[ctrl.block];
-      const special = keys[ctrl.special];
-      const attack = keys[ctrl.attack];
+      const left = frameKeys[ctrl.left];
+      const right = frameKeys[ctrl.right];
+      const up = frameKeys[ctrl.up];
+      const down = frameKeys[ctrl.down];
+      const block = frameKeys[ctrl.block];
+      const special = frameKeys[ctrl.special];
+      const attack = frameKeys[ctrl.attack];
 
       // Block
       if (block && this.onGround && this.blockCooldown <= 0 && !this.moveState && !this.helpless) {
@@ -477,14 +508,14 @@
       if (dir === 'neutral') {
         // Fireball
         this.moveState = { type: 'fireball', timer: 22 };
-        setTimeout(() => {
+        delaySpawn(7, () => {
           projectiles.push({
             owner: this, x: this.cx + this.facing * 30, y: this.cy - 4,
             vx: this.facing * 8, vy: -1, w: 20, h: 16,
             life: 70, damage: 9, kbx: this.facing * 4, kby: -3,
             type: 'fireball', gravity: 0.15, wobble: 0
           });
-        }, 120);
+        });
       } else if (dir === 'up') {
         // Fire propulsion (recovery + hit)
         this.moveState = { type: 'fireUp', timer: 26 };
@@ -509,14 +540,14 @@
       if (dir === 'neutral') {
         // Shuriken
         this.moveState = { type: 'shuriken', timer: 16 };
-        setTimeout(() => {
+        delaySpawn(5, () => {
           projectiles.push({
             owner: this, x: this.cx + this.facing * 24, y: this.cy - 4,
             vx: this.facing * 10, vy: 0, w: 14, h: 14,
             life: 55, damage: 6, kbx: this.facing * 3, kby: -2,
             type: 'shuriken', gravity: 0, spin: 0
           });
-        }, 80);
+        });
       } else if (dir === 'up') {
         // Katana upward dash
         this.moveState = { type: 'katanaUp', timer: 24 };
@@ -527,25 +558,25 @@
       } else if (dir === 'side') {
         // Hand crossbow
         this.moveState = { type: 'crossbow', timer: 20 };
-        setTimeout(() => {
+        delaySpawn(6, () => {
           projectiles.push({
             owner: this, x: this.cx + this.facing * 28, y: this.cy - 2,
             vx: this.facing * 13, vy: 0, w: 22, h: 5,
             life: 45, damage: 8, kbx: this.facing * 4.5, kby: -1.5,
             type: 'bolt', gravity: 0.04
           });
-        }, 100);
+        });
       } else if (dir === 'down') {
         // Smoke bomb — big AoE puff
         this.moveState = { type: 'smoke', timer: 30 };
-        setTimeout(() => {
+        delaySpawn(8, () => {
           projectiles.push({
             owner: this, x: this.cx - 40, y: this.cy - 30,
             vx: 0, vy: 0, w: 80, h: 80,
             life: 40, damage: 0.6, kbx: 0, kby: -1.2,
             type: 'smoke', gravity: 0, persistent: true, tick: 0
           });
-        }, 140);
+        });
       }
     }
 
@@ -559,14 +590,14 @@
       } else if (dir === 'up') {
         // Poison Lob — throws a poison bomb straight up that falls and splashes
         this.moveState = { type: 'poisonLob', timer: 20 };
-        setTimeout(() => {
+        delaySpawn(7, () => {
           projectiles.push({
             owner: this, x: this.cx - 8, y: this.y - 10,
             vx: 0, vy: -10, w: 16, h: 16,
             life: 140, damage: 5, kbx: 0, kby: -2,
             type: 'poisonLob', gravity: 0.35, spin: 0, exploded: false
           });
-        }, 120);
+        });
       } else if (dir === 'side') {
         // Toxic Punch — heaviest punch, knockback scales with current horizontal speed
         // Requires Rhys to be moving to hit hardest. Short startup, short active window.
@@ -581,7 +612,7 @@
       } else if (dir === 'down') {
         // Spore Trap — sets a stationary trap on the ground below Rhys
         this.moveState = { type: 'sporeTrap', timer: 24 };
-        setTimeout(() => {
+        delaySpawn(6, () => {
           // Find ground directly below
           let trapY = GROUND_Y;
           for (const p of platforms) {
@@ -597,7 +628,7 @@
             type: 'sporeTrap', gravity: 0, armed: false, armTimer: 30,
             triggered: false, puff: 0,
           });
-        }, 100);
+        });
       }
     }
 
@@ -606,14 +637,14 @@
       if (dir === 'neutral') {
         // Grenade — lobbed arc projectile, explodes on impact or after fuse
         this.moveState = { type: 'grenade', timer: 22 };
-        setTimeout(() => {
+        delaySpawn(7, () => {
           projectiles.push({
             owner: this, x: this.cx + this.facing * 20, y: this.cy - 6,
             vx: this.facing * 6, vy: -8, w: 14, h: 14,
             life: 90, damage: 10, kbx: this.facing * 5, kby: -5,
             type: 'grenade', gravity: 0.4, spin: 0, fuse: 60,
           });
-        }, 110);
+        });
       } else if (dir === 'up') {
         // Mega Jump — huge vertical launch, grants an extra jump, short superarmor
         this.moveState = { type: 'megaJump', timer: 28 };
@@ -699,13 +730,13 @@
       if (dir === 'neutral') {
         // Beet Blast — short-range shotgun firing 5 spread beet projectiles
         this.moveState = { type: 'beetBlast', timer: 20 };
-        setTimeout(() => {
+        delaySpawn(5, () => {
           const cx = this.cx + this.facing * 18;
           const cy = this.cy - 4;
           // 5 pellets with spread angles
           const spreadAngles = [-0.35, -0.18, 0, 0.18, 0.35];
           for (const ang of spreadAngles) {
-            const speed = 9 + (Math.random() - 0.5) * 1.5;
+            const speed = 9 + (rng() - 0.5) * 1.5;
             projectiles.push({
               owner: this,
               x: cx, y: cy + ang * 20,
@@ -718,7 +749,7 @@
             });
           }
           spawnEffect(cx, cy, '#e070b0', 14, 20);
-        }, 80);
+        });
       } else if (dir === 'up') {
         // Glide — huge fall-speed reduction for a long window. Not a launch,
         // but while active Jonah drifts slowly and can traverse huge distances.
@@ -753,10 +784,10 @@
         // Reads currently-held directional keys to compute the teleport vector.
         const ctrl = controls[this.index];
         let dxd = 0, dyd = 0;
-        if (keys[ctrl.left]) dxd -= 1;
-        if (keys[ctrl.right]) dxd += 1;
-        if (keys[ctrl.up]) dyd -= 1;
-        if (keys[ctrl.down]) dyd += 1;
+        if (frameKeys[ctrl.left]) dxd -= 1;
+        if (frameKeys[ctrl.right]) dxd += 1;
+        if (frameKeys[ctrl.up]) dyd -= 1;
+        if (frameKeys[ctrl.down]) dyd += 1;
         // Default to straight up if only the up key was held to trigger the special
         if (dxd === 0 && dyd === 0) dyd = -1;
         const mag = Math.hypot(dxd, dyd) || 1;
@@ -775,7 +806,7 @@
         // At close range, both connect → full damage.
         this.moveState = { type: 'powerBlast', timer: 28, active: [6, 14], hasHit: null };
         this.vx = this.facing * 1.5;
-        setTimeout(() => {
+        delaySpawn(6, () => {
           projectiles.push({
             owner: this, x: this.cx + this.facing * 28, y: this.cy - 2,
             vx: this.facing * 14, vy: 0, w: 28, h: 6,
@@ -783,7 +814,7 @@
             type: 'laser', gravity: 0,
           });
           spawnEffect(this.cx + this.facing * 30, this.cy - 2, '#4ad7e8', 14, 18);
-        }, 100);
+        });
       } else if (dir === 'down') {
         // Absorb — pulls in nearby enemy projectiles and converts them into healing.
         this.moveState = { type: 'absorb', timer: 32, absorbed: 0 };
@@ -807,14 +838,14 @@
         // fire patch and detonating any fueled enemies in the splash for bonus damage.
         this.moveState = { type: 'igniter', timer: 22 };
         const fwd = this.facing;
-        setTimeout(() => {
+        delaySpawn(6, () => {
           projectiles.push({
             owner: this, x: this.cx + fwd * 18, y: this.cy - 6,
             vx: fwd * 8, vy: -5, w: 12, h: 10,
             life: 80, damage: 7, kbx: fwd * 4, kby: -3,
             type: 'igniter', gravity: 0.45, spin: 0,
           });
-        }, 100);
+        });
         this.attackCooldown = 18;
       } else if (dir === 'up') {
         // Rocket Boost — only triggers if there's any fuel left.
@@ -840,7 +871,7 @@
         this.fuel -= 25;
         this.moveState = { type: 'gasoline', timer: 24 };
         const fwd = this.facing;
-        setTimeout(() => {
+        delaySpawn(5, () => {
           // Spray particles fly forward and arc down to land as a puddle.
           projectiles.push({
             owner: this, x: this.cx + fwd * 26, y: this.cy - 4,
@@ -848,19 +879,19 @@
             life: 40, damage: 0, kbx: 0, kby: 0,
             type: 'gasolineSpray', gravity: 0.5, fwd: fwd,
           });
-        }, 90);
+        });
       } else if (dir === 'down') {
         // Molotov — lobbed bottle that breaks into a fire patch on impact.
         this.moveState = { type: 'molotov', timer: 24 };
         const fwd = this.facing;
-        setTimeout(() => {
+        delaySpawn(6, () => {
           projectiles.push({
             owner: this, x: this.cx + fwd * 18, y: this.cy - 8,
             vx: fwd * 6, vy: -9, w: 12, h: 14,
             life: 100, damage: 8, kbx: fwd * 3, kby: -3,
             type: 'molotov', gravity: 0.45, spin: 0,
           });
-        }, 100);
+        });
       }
     }
 
@@ -1035,8 +1066,8 @@
           this.vy = Math.min(this.vy, 0.8);       // only drift downward slowly
           // Player-steerable horizontal direction during glide
           const ctrl = controls[this.index];
-          if (keys[ctrl.left])  { this.vx = Math.max(this.vx - 0.3, -4.5); this.facing = -1; }
-          else if (keys[ctrl.right]) { this.vx = Math.min(this.vx + 0.3, 4.5); this.facing = 1; }
+          if (frameKeys[ctrl.left])  { this.vx = Math.max(this.vx - 0.3, -4.5); this.facing = -1; }
+          else if (frameKeys[ctrl.right]) { this.vx = Math.min(this.vx + 0.3, 4.5); this.facing = 1; }
           // Wing flap visual
           if (Math.random() < 0.4) spawnEffect(this.cx + (Math.random()-0.5)*30, this.cy + 4, '#a0e0d0', 12, 10);
         }
@@ -1129,15 +1160,15 @@
         if (this.moveState && this.moveState.type === 'rocketBoost') {
           const ctrl = controls[this.index];
           const m = this.moveState;
-          const stillHeld = keys[ctrl.special];
+          const stillHeld = frameKeys[ctrl.special];
           // Drain fuel ~0.34/frame → 100 fuel = ~300 frames = 5 seconds at 60fps.
           if (stillHeld && this.fuel > 0) {
             this.fuel -= 0.34;
             m.holdTime++;
             // Sustained thrust — accelerate upward up to a cap, allow steering left/right.
             this.vy = Math.max(this.vy - 0.9, -10);
-            if (keys[ctrl.left]) { this.vx = Math.max(this.vx - 0.4, -5); this.facing = -1; }
-            else if (keys[ctrl.right]) { this.vx = Math.min(this.vx + 0.4, 5); this.facing = 1; }
+            if (frameKeys[ctrl.left]) { this.vx = Math.max(this.vx - 0.4, -5); this.facing = -1; }
+            else if (frameKeys[ctrl.right]) { this.vx = Math.min(this.vx + 0.4, 5); this.facing = 1; }
             else { this.vx *= 0.94; }
             // Exhaust plume
             if (Math.random() < 0.85) spawnEffect(this.cx + (Math.random()-0.5)*8, this.y + this.h, '#ffaa33', 14, 10);
@@ -1155,7 +1186,7 @@
           if (this.onGround) this.vx *= 0.4;
           const m = this.moveState;
           if (!m.released) {
-            const stillHeld = keys[ctrl.special];
+            const stillHeld = frameKeys[ctrl.special];
             if (stillHeld && m.charge < 90) {
               m.charge++;
               if (Math.random() < 0.4) {
@@ -1252,10 +1283,10 @@
         if (this.ledgeGrabTimer < 40) this.invuln = Math.max(this.invuln, 2);
         // Inputs: press up or away to climb, down/away to drop, attack/special to ledge-attack
         const ctrl = controls[this.index];
-        const up = keys[ctrl.up];
-        const down = keys[ctrl.down];
-        const awayPress = lg.side === -1 ? keys[ctrl.right] : keys[ctrl.left];
-        const towardPress = lg.side === -1 ? keys[ctrl.left] : keys[ctrl.right];
+        const up = frameKeys[ctrl.up];
+        const down = frameKeys[ctrl.down];
+        const awayPress = lg.side === -1 ? frameKeys[ctrl.right] : frameKeys[ctrl.left];
+        const towardPress = lg.side === -1 ? frameKeys[ctrl.left] : frameKeys[ctrl.right];
         if (up || awayPress) {
           // Climb up onto the stage
           this.ledgeGrab = null;
@@ -3166,12 +3197,253 @@
     }
   }
 
+  // ---------- NETWORK STATE ----------
+  // 'local' = shared keyboard, no networking.
+  // 'host'  = this client owns P1 (index 0); P2's inputs come from remote peer.
+  // 'guest' = this client owns P2 (index 1); P1's inputs come from remote peer.
+  const net = {
+    mode: 'local',          // 'local' | 'host' | 'guest'
+    localIndex: 0,          // which player index this client controls
+    peer: null,             // PeerJS Peer instance
+    conn: null,             // PeerJS DataConnection
+    roomCode: '',           // 6-char share code (host's peer id suffix)
+    connected: false,
+    error: '',
+    statusText: '',
+    inputDelay: 3,          // frames of input delay (lockstep buffer)
+    currentFrame: 0,        // logical frame counter for the active match
+    localBuf: new Map(),    // frame → input mask for local player
+    remoteBuf: new Map(),   // frame → input mask for remote player
+    lastSentFrame: -1,
+    lastRecvFrame: -1,
+    waitingForRemote: false,
+    hashHistory: new Map(),  // frame → 32-bit state hash for desync detection
+    desyncFrame: -1,
+  };
+  function netReset() {
+    net.currentFrame = 0;
+    net.localBuf.clear();
+    net.remoteBuf.clear();
+    net.lastSentFrame = -1;
+    net.lastRecvFrame = -1;
+    net.waitingForRemote = false;
+    net.hashHistory.clear();
+    net.desyncFrame = -1;
+  }
+
+  // Handshake state (shared between host/guest).
+  // Both sides exchange character + seed, then transition into PLAY together.
+  let netPending = null; // { hostChar, guestChar, seed } once both filled
+  function netReadyToStart() {
+    return netPending && netPending.hostChar && netPending.guestChar && (netPending.seed != null);
+  }
+
+  function generateRoomCode() {
+    const alphabet = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789'; // unambiguous
+    let s = '';
+    for (let i = 0; i < 6; i++) s += alphabet[Math.floor(Math.random() * alphabet.length)];
+    return s;
+  }
+
+  function netCleanup() {
+    try { net.conn && net.conn.close(); } catch (e) {}
+    try { net.peer && net.peer.destroy(); } catch (e) {}
+    net.conn = null;
+    net.peer = null;
+    net.connected = false;
+    netPending = null;
+  }
+
+  function startHost(localChar) {
+    if (typeof Peer === 'undefined') {
+      net.error = 'PeerJS not loaded — host the file on a real URL (Netlify/Pages).';
+      return;
+    }
+    netCleanup();
+    net.mode = 'host';
+    net.localIndex = 0;
+    net.statusText = 'creating room...';
+    net.error = '';
+    const code = 'ab-' + generateRoomCode().toLowerCase(); // 'ab-' prefix to namespace
+    net.roomCode = code.slice(3).toUpperCase();
+    netPending = { hostChar: localChar, guestChar: null, seed: (Math.random() * 0x7fffffff) | 0 };
+    net.peer = new Peer(code);
+    net.peer.on('open', () => { net.statusText = 'waiting for guest...'; });
+    net.peer.on('error', e => {
+      net.error = (e && e.type) || 'peer error';
+      net.statusText = 'error: ' + net.error;
+    });
+    net.peer.on('connection', conn => {
+      net.conn = conn;
+      conn.on('open', () => {
+        net.connected = true;
+        net.statusText = 'guest connected, waiting for char select...';
+        // Send our char + seed
+        try {
+          conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed });
+        } catch (e) {}
+      });
+      conn.on('data', handleNetMsg);
+      conn.on('close', () => {
+        net.connected = false;
+        net.statusText = 'guest disconnected';
+      });
+    });
+  }
+
+  function startGuest(roomCode, localChar) {
+    if (typeof Peer === 'undefined') {
+      net.error = 'PeerJS not loaded — host the file on a real URL.';
+      return;
+    }
+    netCleanup();
+    net.mode = 'guest';
+    net.localIndex = 1;
+    net.statusText = 'connecting to ' + roomCode + '...';
+    net.error = '';
+    net.roomCode = roomCode;
+    netPending = { hostChar: null, guestChar: localChar, seed: null };
+    net.peer = new Peer();
+    net.peer.on('open', () => {
+      const targetId = 'ab-' + roomCode.toLowerCase();
+      net.conn = net.peer.connect(targetId, { reliable: true });
+      net.conn.on('open', () => {
+        net.connected = true;
+        net.statusText = 'connected, sending char...';
+        try {
+          net.conn.send({ t: 'guestChar', char: netPending.guestChar });
+        } catch (e) {}
+      });
+      net.conn.on('data', handleNetMsg);
+      net.conn.on('close', () => {
+        net.connected = false;
+        net.statusText = 'host disconnected';
+      });
+    });
+    net.peer.on('error', e => {
+      net.error = (e && e.type) || 'peer error';
+      net.statusText = 'error: ' + net.error;
+    });
+  }
+
+  function handleNetMsg(msg) {
+    if (!msg || typeof msg !== 'object') return;
+    if (msg.t === 'init') {
+      // Guest receives this from host
+      netPending = netPending || { hostChar: null, guestChar: null, seed: null };
+      netPending.hostChar = msg.hostChar;
+      netPending.seed = msg.seed;
+      net.statusText = 'host: ' + msg.hostChar + ' — waiting to start';
+    } else if (msg.t === 'guestChar') {
+      // Host receives this from guest
+      netPending = netPending || { hostChar: null, guestChar: null, seed: null };
+      netPending.guestChar = msg.char;
+      net.statusText = 'guest: ' + msg.char + ' — press ENTER to start';
+    } else if (msg.t === 'startMatch') {
+      // Coordinated start signal from host
+      if (net.mode === 'guest' && netReadyToStart()) {
+        beginNetMatch();
+      }
+    } else if (msg.t === 'input') {
+      net.remoteBuf.set(msg.frame, msg.mask);
+      if (msg.frame > net.lastRecvFrame) net.lastRecvFrame = msg.frame;
+    } else if (msg.t === 'hash') {
+      // Desync check: peer sent their state hash for some frame; compare with ours.
+      const ours = net.hashHistory.get(msg.frame);
+      if (ours !== undefined && ours !== msg.hash) {
+        net.desyncFrame = msg.frame;
+        net.statusText = 'DESYNC at frame ' + msg.frame;
+      }
+    } else if (msg.t === 'pause') {
+      // Reserved for future pause/resume
+    }
+  }
+
+  // Lightweight 32-bit hash of the gameplay-relevant state. Computed every 60
+  // frames in online matches and exchanged with the peer to detect desyncs.
+  function computeStateHash() {
+    let h = 0x811c9dc5;
+    function mix(n) {
+      n = (n | 0);
+      h ^= n;
+      h = Math.imul(h, 0x01000193);
+    }
+    for (const f of fighters) {
+      mix(Math.round(f.x * 100));
+      mix(Math.round(f.y * 100));
+      mix(Math.round(f.vx * 100));
+      mix(Math.round(f.vy * 100));
+      mix(Math.round(f.damage * 100));
+      mix(f.stocks);
+      mix(Math.round(f.fuel * 10));
+      mix(f.fueled);
+      mix(f.poisonTimer);
+      mix(f.hitstun);
+      mix(f.invuln);
+      mix(f.helpless ? 1 : 0);
+      mix(f.endlag);
+      mix(f.moveState ? f.moveState.timer : -1);
+    }
+    mix(projectiles.length);
+    for (const p of projectiles) {
+      mix(Math.round(p.x * 100));
+      mix(Math.round(p.y * 100));
+      mix(p.life);
+    }
+    return h >>> 0;
+  }
+
+  function beginNetMatch() {
+    if (!netReadyToStart()) return;
+    // Both clients land here independently and call startMatch with synced inputs.
+    menuSel[0] = CHAR_KEYS.indexOf(netPending.hostChar);
+    menuSel[1] = CHAR_KEYS.indexOf(netPending.guestChar);
+    matchSeed = netPending.seed;
+    netReset();
+    startMatch();
+  }
+
+  // ---------- INPUT SNAPSHOT (for deterministic stepping) ----------
+  // Each frame we build a "snapshot" of all keycodes being held. Fighter logic
+  // reads from frameKeys (not keys directly) so the network layer can substitute
+  // a remote player's inputs for the local keyboard's view of those keycodes.
+  const frameKeys = {};
+  const INPUT_BTNS = ['left', 'right', 'up', 'down', 'block', 'special', 'attack'];
+  function snapshotInputsLocal() {
+    // Local 2P: copy all keys that appear in either control map.
+    for (let i = 0; i < 2; i++) {
+      const c = controls[i];
+      for (const b of INPUT_BTNS) frameKeys[c[b]] = !!keys[c[b]];
+    }
+  }
+  // Capture the local player's inputs as a 7-bit mask for sending over the wire.
+  function captureLocalInputBits(localIndex) {
+    const c = controls[localIndex];
+    let mask = 0;
+    for (let i = 0; i < INPUT_BTNS.length; i++) {
+      if (keys[c[INPUT_BTNS[i]]]) mask |= (1 << i);
+    }
+    return mask;
+  }
+  // Apply a 7-bit input mask to frameKeys for the given player's keycodes.
+  function applyInputBitsToFrame(playerIndex, mask) {
+    const c = controls[playerIndex];
+    for (let i = 0; i < INPUT_BTNS.length; i++) {
+      frameKeys[c[INPUT_BTNS[i]]] = (mask & (1 << i)) !== 0;
+    }
+  }
+
   // ---------- MATCH ----------
   let fighters = [];
+  let matchSeed = 0x9e3779b9; // deterministic seed for the current match (network-syncable)
 
   function startMatch() {
     projectiles.length = 0;
     effects.length = 0;
+    pendingSpawns.length = 0;
+    // For local play, freshen the seed each match so moves don't replay identically.
+    if (net.mode === 'local') matchSeed = (Date.now() & 0x7fffffff) | 0;
+    rngSeed(matchSeed);
     const p1Key = CHAR_KEYS[menuSel[0]];
     const p2Key = CHAR_KEYS[menuSel[1]];
     fighters = [
@@ -4182,29 +4454,98 @@
 
   // ---------- MENU ----------
   let menuPrevKeys = {};
+  let menuStage = 'mode';      // 'mode' | 'code' | 'chars'
+  let menuModeIdx = 0;          // 0=LOCAL, 1=HOST, 2=JOIN
+  let joinCodeInput = '';
+  const MODE_LABELS = ['LOCAL 2P', 'HOST ONLINE', 'JOIN ONLINE'];
+  const ROOM_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
   function updateMenu() {
-    // Each player chooses independently
-    for (let i = 0; i < 2; i++) {
-      const ctrl = controls[i];
-      const left = keys[ctrl.left] && !menuPrevKeys[ctrl.left];
-      const right = keys[ctrl.right] && !menuPrevKeys[ctrl.right];
-      const special = keys[ctrl.special] && !menuPrevKeys[ctrl.special];
-      const block = keys[ctrl.block] && !menuPrevKeys[ctrl.block];
+    const c0 = controls[0];
+    const c1 = controls[1];
+    const tap = (code) => keys[code] && !menuPrevKeys[code];
 
-      if (!menuConfirm[i]) {
-        if (left) menuSel[i] = (menuSel[i] + CHAR_KEYS.length - 1) % CHAR_KEYS.length;
-        if (right) menuSel[i] = (menuSel[i] + 1) % CHAR_KEYS.length;
-        if (special) menuConfirm[i] = true;
+    if (menuStage === 'mode') {
+      // P1 cycles between LOCAL/HOST/JOIN with left/right, confirms with special.
+      if (tap(c0.left)) menuModeIdx = (menuModeIdx + 2) % 3;
+      if (tap(c0.right)) menuModeIdx = (menuModeIdx + 1) % 3;
+      if (tap(c0.special)) {
+        if (menuModeIdx === 0) {
+          net.mode = 'local';
+          menuStage = 'chars';
+        } else if (menuModeIdx === 1) {
+          net.mode = 'host';
+          menuStage = 'chars';
+        } else {
+          net.mode = 'guest';
+          joinCodeInput = '';
+          menuStage = 'code';
+        }
+      }
+    } else if (menuStage === 'code') {
+      // Cancel back to mode select with block
+      if (tap(c0.block)) {
+        menuStage = 'mode';
+        net.mode = 'local';
+        netCleanup();
+      } else if (tap('Backspace') && joinCodeInput.length > 0) {
+        joinCodeInput = joinCodeInput.slice(0, -1);
+      } else if (tap('Enter') && joinCodeInput.length === 6) {
+        net.roomCode = joinCodeInput;
+        menuStage = 'chars';
+      } else if (joinCodeInput.length < 6) {
+        for (let k = 0; k < ROOM_ALPHABET.length; k++) {
+          const ch = ROOM_ALPHABET[k];
+          const code = /[A-Z]/.test(ch) ? 'Key' + ch : 'Digit' + ch;
+          if (tap(code)) { joinCodeInput += ch; break; }
+        }
+      }
+    } else if (menuStage === 'chars') {
+      // Determine who picks: local=both, host=P1 only, guest=P2 only.
+      const pickers = (net.mode === 'local') ? [0, 1] : [net.mode === 'host' ? 0 : 1];
+      for (const i of pickers) {
+        const ctrl = controls[i];
+        if (!menuConfirm[i]) {
+          if (tap(ctrl.left)) menuSel[i] = (menuSel[i] + CHAR_KEYS.length - 1) % CHAR_KEYS.length;
+          if (tap(ctrl.right)) menuSel[i] = (menuSel[i] + 1) % CHAR_KEYS.length;
+          if (tap(ctrl.special)) {
+            menuConfirm[i] = true;
+            // First confirm on net side opens the connection.
+            if (net.mode === 'host' && !net.peer) {
+              startHost(CHAR_KEYS[menuSel[0]]);
+            } else if (net.mode === 'guest' && !net.peer) {
+              startGuest(net.roomCode, CHAR_KEYS[menuSel[1]]);
+            }
+          }
+        } else if (tap(ctrl.block)) {
+          menuConfirm[i] = false;
+          if (net.mode !== 'local') {
+            // Cancel networking on un-ready
+            netCleanup();
+            net.statusText = '';
+          }
+        }
+      }
+      // For online modes, mirror the picked char into netPending so a re-host/connect is consistent.
+      if (net.mode !== 'local' && netPending) {
+        if (net.mode === 'host') netPending.hostChar = CHAR_KEYS[menuSel[0]];
+        else netPending.guestChar = CHAR_KEYS[menuSel[1]];
+      }
+      // Start the match.
+      if (net.mode === 'local') {
+        if (tap('Enter') && menuConfirm[0] && menuConfirm[1]) startMatch();
+      } else if (net.mode === 'host') {
+        // Host needs both chars + connection, then ENTER to start.
+        if (tap('Enter') && menuConfirm[0] && netReadyToStart()) {
+          try { net.conn && net.conn.send({ t: 'startMatch' }); } catch (e) {}
+          beginNetMatch();
+        }
       } else {
-        if (block) menuConfirm[i] = false;
+        // Guest waits for host's startMatch signal — handled in handleNetMsg.
       }
     }
-    menuPrevKeys = { ...keys };
 
-    if (keys['Enter'] && menuConfirm[0] && menuConfirm[1]) {
-      startMatch();
-    }
+    menuPrevKeys = { ...keys };
   }
 
   function drawMenu() {
@@ -4217,7 +4558,72 @@
     ctx.fillText('ALPHA BRAWL', W/2, 80);
     ctx.fillStyle = '#999';
     ctx.font = '14px sans-serif';
-    ctx.fillText('Select your fighter', W/2, 108);
+
+    if (menuStage === 'mode') {
+      ctx.fillText('Choose mode', W/2, 108);
+      // Three big buttons centered
+      const btnW = 220, btnH = 70, gapY = 20;
+      const totalH = 3 * btnH + 2 * gapY;
+      const startY = H/2 - totalH/2;
+      for (let m = 0; m < 3; m++) {
+        const by = startY + m * (btnH + gapY);
+        const sel = m === menuModeIdx;
+        ctx.fillStyle = sel ? '#22223a' : '#15151f';
+        ctx.fillRect(W/2 - btnW/2, by, btnW, btnH);
+        ctx.strokeStyle = sel ? '#ff6a2a' : '#3a3a55';
+        ctx.lineWidth = sel ? 3 : 1.5;
+        ctx.strokeRect(W/2 - btnW/2, by, btnW, btnH);
+        ctx.fillStyle = sel ? '#ffeb3b' : '#aaa';
+        ctx.font = 'bold 22px sans-serif';
+        ctx.fillText(MODE_LABELS[m], W/2, by + btnH/2 + 8);
+      }
+      ctx.fillStyle = '#888';
+      ctx.font = '12px sans-serif';
+      ctx.fillText('P1: A/D cycle, F confirm', W/2, H - 60);
+      ctx.fillText('Online play needs the page hosted on a real URL (Netlify Drop / GitHub Pages).', W/2, H - 38);
+      ctx.textAlign = 'left';
+      return;
+    }
+
+    if (menuStage === 'code') {
+      ctx.fillText('Enter the 6-char room code from your friend', W/2, 130);
+      // Code boxes
+      const boxW = 56, boxH = 72, gapX = 12;
+      const totalW = 6 * boxW + 5 * gapX;
+      const startX = W/2 - totalW/2;
+      for (let i = 0; i < 6; i++) {
+        const bx = startX + i * (boxW + gapX);
+        const filled = i < joinCodeInput.length;
+        const cursorHere = i === joinCodeInput.length;
+        ctx.fillStyle = '#15151f';
+        ctx.fillRect(bx, H/2 - boxH/2, boxW, boxH);
+        ctx.strokeStyle = cursorHere ? '#ffeb3b' : (filled ? '#4ab8ff' : '#3a3a55');
+        ctx.lineWidth = cursorHere ? 3 : 2;
+        ctx.strokeRect(bx, H/2 - boxH/2, boxW, boxH);
+        if (filled) {
+          ctx.fillStyle = '#fff';
+          ctx.font = 'bold 40px monospace';
+          ctx.fillText(joinCodeInput[i], bx + boxW/2, H/2 + 14);
+        } else if (cursorHere && (Math.floor(Date.now() / 400) % 2)) {
+          ctx.fillStyle = '#ffeb3b';
+          ctx.fillRect(bx + boxW/2 - 1, H/2 - 16, 2, 32);
+        }
+      }
+      ctx.fillStyle = '#888';
+      ctx.font = '12px sans-serif';
+      ctx.fillText('Type letters/digits, BACKSPACE to delete, ENTER to confirm, L-SHIFT to cancel', W/2, H - 40);
+      ctx.textAlign = 'left';
+      return;
+    }
+
+    // menuStage === 'chars'
+    if (net.mode === 'local') {
+      ctx.fillText('Select your fighters', W/2, 108);
+    } else if (net.mode === 'host') {
+      ctx.fillText('Hosting — pick your fighter', W/2, 108);
+    } else {
+      ctx.fillText('Joining ' + net.roomCode + ' — pick your fighter', W/2, 108);
+    }
 
     // Dynamic card layout for any roster size
     const N = CHAR_KEYS.length;
@@ -4278,25 +4684,24 @@
       }
     }
 
-    // selection cursors for P1 above, P2 below
+    // Cursors — only the local-controlling players in net mode get a cursor.
+    const showCursorFor = (net.mode === 'local') ? [true, true]
+                       : (net.mode === 'host')   ? [true, false]
+                                                 : [false, true];
     for (let i = 0; i < 2; i++) {
+      if (!showCursorFor[i]) continue;
       const cx = cardPositions[menuSel[i]];
       const label = `P${i+1}`;
       const color = i === 0 ? '#ff6a2a' : '#4ab8ff';
       const yOff = i === 0 ? 155 : 445;
-
       ctx.fillStyle = color;
       ctx.font = 'bold 15px sans-serif';
       ctx.fillText(label + (menuConfirm[i] ? ' — READY' : ' — pick'), cx, yOff);
-
-      // underline / frame for selected card
       ctx.strokeStyle = color;
       ctx.lineWidth = menuConfirm[i] ? 4 : 3;
       if (menuConfirm[i]) {
-        // Full frame around confirmed card
         ctx.strokeRect(cx - cardW/2 - 3, cardCY - cardH/2 - 3, cardW + 6, cardH + 6);
       } else {
-        // Cursor line above/below the card
         const lineY = i === 0 ? cardCY - cardH/2 - 6 : cardCY + cardH/2 + 6;
         ctx.beginPath();
         ctx.moveTo(cx - 80, lineY);
@@ -4305,12 +4710,66 @@
       }
     }
 
+    // Online status overlay (replaces the missing remote-side cursor)
+    if (net.mode !== 'local') {
+      const remoteIdx = (net.mode === 'host') ? 1 : 0;
+      const color = remoteIdx === 0 ? '#ff6a2a' : '#4ab8ff';
+      const yOff = remoteIdx === 0 ? 155 : 445;
+      ctx.textAlign = 'center';
+      ctx.fillStyle = color;
+      ctx.font = 'bold 16px sans-serif';
+      let title = '';
+      if (net.mode === 'host') {
+        title = `ROOM CODE: ${net.roomCode}`;
+      } else {
+        title = `ROOM ${net.roomCode}`;
+      }
+      ctx.fillText(title, W/2, yOff);
+      ctx.fillStyle = net.connected ? '#a0e0d0' : '#888';
+      ctx.font = '12px sans-serif';
+      const remoteChar = net.mode === 'host' ? (netPending && netPending.guestChar) : (netPending && netPending.hostChar);
+      if (remoteChar) {
+        ctx.fillStyle = CHARS[remoteChar].color;
+        ctx.fillText('opponent: ' + CHARS[remoteChar].name.toUpperCase(), W/2, yOff + 18);
+      } else {
+        ctx.fillStyle = '#888';
+        ctx.fillText(net.statusText || 'waiting...', W/2, yOff + 18);
+      }
+      if (net.error) {
+        ctx.fillStyle = '#ff4444';
+        ctx.fillText('error: ' + net.error, W/2, yOff + 36);
+      }
+    }
+
     ctx.fillStyle = '#aaa';
     ctx.font = '11px sans-serif';
-    ctx.fillText('P1: A/D cycle, F confirm, L-Shift cancel      P2: ←/→ cycle, L confirm, R-Shift cancel', W/2, H - 55);
-    ctx.fillStyle = (menuConfirm[0] && menuConfirm[1]) ? '#4ab8ff' : '#555';
+    if (net.mode === 'local') {
+      ctx.fillText('P1: A/D cycle, F confirm, L-Shift cancel      P2: ←/→ cycle, L confirm, R-Shift cancel', W/2, H - 55);
+    } else if (net.mode === 'host') {
+      ctx.fillText('A/D cycle, F confirm, L-Shift cancel      Share the room code with a friend', W/2, H - 55);
+    } else {
+      ctx.fillText('←/→ cycle, L confirm, R-Shift cancel      Connecting to host...', W/2, H - 55);
+    }
+    let ready = false, label = 'Both players must confirm';
+    if (net.mode === 'local') {
+      ready = menuConfirm[0] && menuConfirm[1];
+      label = ready ? 'Press ENTER to fight!' : 'Both players must confirm';
+    } else if (net.mode === 'host') {
+      ready = menuConfirm[0] && netReadyToStart();
+      label = ready ? 'Press ENTER to fight!'
+            : (!menuConfirm[0]) ? 'Confirm your fighter to host'
+            : !net.connected ? 'Waiting for guest to join...'
+            : 'Waiting for guest to pick a fighter...';
+    } else {
+      ready = false;
+      label = !menuConfirm[1] ? 'Confirm your fighter to join'
+            : !net.connected ? 'Connecting to host...'
+            : !netReadyToStart() ? 'Waiting for host to pick a fighter...'
+            : 'Waiting for host to start the match...';
+    }
+    ctx.fillStyle = ready ? '#4ab8ff' : '#555';
     ctx.font = 'bold 14px sans-serif';
-    ctx.fillText(menuConfirm[0] && menuConfirm[1] ? 'Press ENTER to fight!' : 'Both players must confirm', W/2, H - 32);
+    ctx.fillText(label, W/2, H - 32);
 
     // Move list hint
     ctx.font = '10px monospace';
@@ -4353,16 +4812,116 @@
   }
 
   // ---------- MAIN LOOP ----------
+  // ---------- NETWORK STEP ----------
+  // Called at the top of every PLAY frame. Returns true if the simulation can
+  // advance this frame (inputs ready), false if we're waiting on the remote.
+  function stepNetworkFrame() {
+    if (net.mode === 'local') {
+      snapshotInputsLocal();
+      return true;
+    }
+    // Online: capture local input and buffer it for `currentFrame + inputDelay`.
+    const targetFrame = net.currentFrame + net.inputDelay;
+    const localMask = captureLocalInputBits(net.localIndex);
+    net.localBuf.set(targetFrame, localMask);
+    // Send to peer (only if connected and we haven't already sent this frame).
+    if (net.connected && net.conn && net.lastSentFrame < targetFrame) {
+      try {
+        net.conn.send({ t: 'input', frame: targetFrame, mask: localMask });
+        net.lastSentFrame = targetFrame;
+      } catch (e) { /* connection may have closed */ }
+    }
+    // For the lookup frame: in lockstep both clients use the input that was buffered
+    // `inputDelay` frames ago. Local: net.localBuf.get(currentFrame). Remote: same.
+    const localForFrame = net.localBuf.get(net.currentFrame);
+    const remoteForFrame = net.remoteBuf.get(net.currentFrame);
+    if (localForFrame === undefined || remoteForFrame === undefined) {
+      // First few frames before the buffer fills, treat as no-input.
+      // Specifically: if currentFrame < inputDelay, both sides assume mask=0 since
+      // nothing was buffered before the match started.
+      if (net.currentFrame < net.inputDelay) {
+        applyInputBitsToFrame(net.localIndex, localForFrame || 0);
+        applyInputBitsToFrame(1 - net.localIndex, remoteForFrame || 0);
+        net.waitingForRemote = false;
+        net.currentFrame++;
+        return true;
+      }
+      // Past initial window — we're stuck waiting on remote input.
+      net.waitingForRemote = (remoteForFrame === undefined);
+      return false;
+    }
+    applyInputBitsToFrame(net.localIndex, localForFrame);
+    applyInputBitsToFrame(1 - net.localIndex, remoteForFrame);
+    net.waitingForRemote = false;
+    // Cleanup old buffer entries
+    if (net.currentFrame % 60 === 0) {
+      const cutoff = net.currentFrame - 30;
+      for (const k of net.localBuf.keys()) if (k < cutoff) net.localBuf.delete(k);
+      for (const k of net.remoteBuf.keys()) if (k < cutoff) net.remoteBuf.delete(k);
+    }
+    net.currentFrame++;
+    return true;
+  }
+
+  function drawNetOverlay() {
+    if (net.mode === 'local') return;
+    ctx.fillStyle = 'rgba(10, 10, 20, 0.7)';
+    ctx.fillRect(W - 200, 8, 192, 50);
+    ctx.strokeStyle = net.connected ? '#5aaf3a' : '#ff6a2a';
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(W - 200, 8, 192, 50);
+    ctx.fillStyle = '#fff';
+    ctx.font = 'bold 11px sans-serif';
+    ctx.textAlign = 'left';
+    ctx.fillText(net.mode === 'host' ? 'HOSTING' : 'GUEST', W - 192, 22);
+    ctx.fillStyle = net.connected ? '#a0e0d0' : '#ff8a3a';
+    ctx.font = '10px monospace';
+    ctx.fillText(net.statusText || (net.connected ? 'connected' : 'connecting...'), W - 192, 36);
+    if (net.desyncFrame > 0) {
+      ctx.fillStyle = '#ff4444';
+      ctx.fillText('DESYNC @ ' + net.desyncFrame, W - 192, 50);
+    } else if (net.waitingForRemote) {
+      ctx.fillStyle = '#ffeb3b';
+      ctx.fillText('waiting for peer...', W - 192, 50);
+    } else if (net.connected) {
+      ctx.fillStyle = '#888';
+      ctx.fillText(`frame ${net.currentFrame}  delay ${net.inputDelay}`, W - 192, 50);
+    }
+  }
+
   function loop() {
     if (state === STATE.MENU) {
       drawMenu();
       updateMenu();
     } else if (state === STATE.PLAY) {
-      // update
+      // Build the per-frame input snapshot. In local mode this is just the
+      // current keyboard state; in online mode the netcode swaps in remote inputs.
+      if (!stepNetworkFrame()) {
+        // Lockstep is waiting on a remote frame — render the last state and bail
+        // until inputs arrive.
+        drawBackdrop(); applyCamera(); drawStage(); drawProjectiles();
+        for (const f of fighters) f.render(ctx);
+        drawEffects(); releaseCamera(); drawOffstageIndicators(); drawHUD();
+        drawNetOverlay();
+        requestAnimationFrame(loop);
+        return;
+      }
+      // update — tick frame-counter spawns first so windup → projectile spawn
+      // happens deterministically each frame.
+      tickPendingSpawns();
       for (const f of fighters) f.update();
       updateProjectiles();
       resolveMelee();
       updateCamera();
+
+      // Online: every 60 frames, exchange a state hash with the peer.
+      if (net.mode !== 'local' && net.connected && net.currentFrame > 0 && net.currentFrame % 60 === 0) {
+        const h = computeStateHash();
+        net.hashHistory.set(net.currentFrame, h);
+        try { net.conn && net.conn.send({ t: 'hash', frame: net.currentFrame, hash: h }); } catch (e) {}
+        // Trim old entries
+        for (const k of net.hashHistory.keys()) if (k < net.currentFrame - 600) net.hashHistory.delete(k);
+      }
 
       // check victory
       const alive = fighters.filter(f => f.stocks > 0);
@@ -4381,6 +4940,7 @@
       releaseCamera();
       drawOffstageIndicators();
       drawHUD();
+      drawNetOverlay();
     } else if (state === STATE.OVER) {
       drawBackdrop();
       applyCamera();
@@ -4391,12 +4951,28 @@
       releaseCamera();
       drawOffstageIndicators();
       drawHUD();
+      drawNetOverlay();
       drawGameOver();
 
       if (keys['Enter']) {
         state = STATE.MENU;
         menuConfirm = [false, false];
         winner = null;
+        menuStage = 'mode';
+        netCleanup();
+        net.mode = 'local';
+      }
+    }
+
+    // Global ESC: leave match (or any non-menu screen) back to the main menu.
+    if (keys['Escape']) {
+      if (state !== STATE.MENU) {
+        state = STATE.MENU;
+        menuConfirm = [false, false];
+        menuStage = 'mode';
+        winner = null;
+        netCleanup();
+        net.mode = 'local';
       }
     }
 
