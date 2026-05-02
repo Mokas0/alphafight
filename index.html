@@ -3208,6 +3208,7 @@
     conn: null,             // PeerJS DataConnection
     roomCode: '',           // 6-char share code (host's peer id suffix)
     connected: false,
+    everConnected: false,   // true once conn.on('open') has fired at least once
     error: '',
     statusText: '',
     inputDelay: 3,          // frames of input delay (lockstep buffer)
@@ -3251,6 +3252,7 @@
     net.conn = null;
     net.peer = null;
     net.connected = false;
+    net.everConnected = false;
     netPending = null;
   }
 
@@ -3277,6 +3279,7 @@
       net.conn = conn;
       conn.on('open', () => {
         net.connected = true;
+        net.everConnected = true;
         net.statusText = 'guest connected, waiting for char select...';
         // Send our char + seed
         try {
@@ -3309,6 +3312,7 @@
       net.conn = net.peer.connect(targetId, { reliable: true });
       net.conn.on('open', () => {
         net.connected = true;
+        net.everConnected = true;
         net.statusText = 'connected, sending char...';
         try {
           net.conn.send({ t: 'guestChar', char: netPending.guestChar });
@@ -5002,8 +5006,12 @@
       netCleanup();
       net.mode = 'local';
     }
-    // Connection loss in net mode while in PLAY/lobby — bail to mode select.
-    if (net.mode !== 'local' && !net.connected && state !== STATE.MENU) {
+    // Connection-loss bail-out: only fire if the peer was actually connected at
+    // some point and has now dropped (net.everConnected true, net.connected false).
+    // Without the everConnected guard the check would fire during the legit
+    // "host created peer, no guest yet" window where peer != null but connected
+    // is still false.
+    if (net.mode !== 'local' && net.everConnected && !net.connected) {
       state = STATE.MENU;
       menuConfirm = [false, false];
       menuStage = 'mode';
@@ -5011,16 +5019,6 @@
       net.error = net.error || 'peer disconnected';
       netCleanup();
       net.mode = 'local';
-    }
-    // Same for the lobby: if we're in chars stage in net mode and connection dropped, bail.
-    if (net.mode !== 'local' && state === STATE.MENU && menuStage === 'chars' && !net.connected) {
-      menuStage = 'mode';
-      menuConfirm = [false, false];
-      net.error = net.error || 'peer disconnected';
-      const oldRoom = net.roomCode;
-      netCleanup();
-      net.mode = 'local';
-      net.roomCode = oldRoom; // keep so user can see what room they were in (purely informational)
     }
   }
 
