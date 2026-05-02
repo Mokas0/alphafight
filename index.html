@@ -4826,25 +4826,28 @@
       snapshotInputsLocal();
       return true;
     }
-    // Online: capture local input and buffer it for `currentFrame + inputDelay`.
+    // Capture and send local input EXACTLY ONCE per slot. Critical: while we're
+    // stuck waiting for a remote frame, we get called repeatedly with the same
+    // currentFrame, so targetFrame stays the same. If we re-captured and
+    // overwrote localBuf without re-sending, our local copy and the peer's view
+    // would diverge — we'd play frame F+3 with our latest input, but the peer
+    // would play it with whatever we sent first. Hence the .has() guard.
     const targetFrame = net.currentFrame + net.inputDelay;
-    const localMask = captureLocalInputBits();
-    net.localBuf.set(targetFrame, localMask);
-    // Send to peer (only if connected and we haven't already sent this frame).
-    if (net.connected && net.conn && net.lastSentFrame < targetFrame) {
-      try {
-        net.conn.send({ t: 'input', frame: targetFrame, mask: localMask });
-        net.lastSentFrame = targetFrame;
-      } catch (e) { /* connection may have closed */ }
+    if (!net.localBuf.has(targetFrame)) {
+      const localMask = captureLocalInputBits();
+      net.localBuf.set(targetFrame, localMask);
+      if (net.connected && net.conn) {
+        try {
+          net.conn.send({ t: 'input', frame: targetFrame, mask: localMask });
+          net.lastSentFrame = targetFrame;
+        } catch (e) { /* connection may have closed */ }
+      }
     }
-    // For the lookup frame: in lockstep both clients use the input that was buffered
-    // `inputDelay` frames ago. Local: net.localBuf.get(currentFrame). Remote: same.
+    // Lookup inputs for the frame we're currently trying to advance past.
     const localForFrame = net.localBuf.get(net.currentFrame);
     const remoteForFrame = net.remoteBuf.get(net.currentFrame);
     if (localForFrame === undefined || remoteForFrame === undefined) {
       // First few frames before the buffer fills, treat as no-input.
-      // Specifically: if currentFrame < inputDelay, both sides assume mask=0 since
-      // nothing was buffered before the match started.
       if (net.currentFrame < net.inputDelay) {
         applyInputBitsToFrame(net.localIndex, localForFrame || 0);
         applyInputBitsToFrame(1 - net.localIndex, remoteForFrame || 0);
