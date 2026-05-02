@@ -3417,8 +3417,11 @@
     }
   }
   // Capture the local player's inputs as a 7-bit mask for sending over the wire.
-  function captureLocalInputBits(localIndex) {
-    const c = controls[localIndex];
+  // In online mode the local keyboard always uses the P1 scheme (WASD / LShift / F / R)
+  // regardless of whether this client owns fighter index 0 or 1 — the network layer
+  // routes the mask to the correct fighter via applyInputBitsToFrame.
+  function captureLocalInputBits() {
+    const c = controls[0];
     let mask = 0;
     for (let i = 0; i < INPUT_BTNS.length; i++) {
       if (keys[c[INPUT_BTNS[i]]]) mask |= (1 << i);
@@ -4501,10 +4504,13 @@
         }
       }
     } else if (menuStage === 'chars') {
-      // Determine who picks: local=both, host=P1 only, guest=P2 only.
-      const pickers = (net.mode === 'local') ? [0, 1] : [net.mode === 'host' ? 0 : 1];
-      for (const i of pickers) {
-        const ctrl = controls[i];
+      // Local 2P: each player uses their own control scheme.
+      // Online: the local player always uses the P1 scheme (WASD/LShift/F/R)
+      // regardless of which fighter index they own. (fighterIdx, keyboardCtrl) pairs.
+      const pickers = (net.mode === 'local')
+        ? [{ fighterIdx: 0, ctrl: controls[0] }, { fighterIdx: 1, ctrl: controls[1] }]
+        : [{ fighterIdx: net.mode === 'host' ? 0 : 1, ctrl: controls[0] }];
+      for (const { fighterIdx: i, ctrl } of pickers) {
         if (!menuConfirm[i]) {
           if (tap(ctrl.left)) menuSel[i] = (menuSel[i] + CHAR_KEYS.length - 1) % CHAR_KEYS.length;
           if (tap(ctrl.right)) menuSel[i] = (menuSel[i] + 1) % CHAR_KEYS.length;
@@ -4748,7 +4754,7 @@
     } else if (net.mode === 'host') {
       ctx.fillText('A/D cycle, F confirm, L-Shift cancel      Share the room code with a friend', W/2, H - 55);
     } else {
-      ctx.fillText('←/→ cycle, L confirm, R-Shift cancel      Connecting to host...', W/2, H - 55);
+      ctx.fillText('A/D cycle, F confirm, L-Shift cancel      Connecting to host...', W/2, H - 55);
     }
     let ready = false, label = 'Both players must confirm';
     if (net.mode === 'local') {
@@ -4822,7 +4828,7 @@
     }
     // Online: capture local input and buffer it for `currentFrame + inputDelay`.
     const targetFrame = net.currentFrame + net.inputDelay;
-    const localMask = captureLocalInputBits(net.localIndex);
+    const localMask = captureLocalInputBits();
     net.localBuf.set(targetFrame, localMask);
     // Send to peer (only if connected and we haven't already sent this frame).
     if (net.connected && net.conn && net.lastSentFrame < targetFrame) {

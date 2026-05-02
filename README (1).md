@@ -19,6 +19,9 @@ on your end), with deterministic lockstep netcode and a 3-frame input delay buff
 - **Host**: pick HOST, confirm your fighter, share the 6-char room code with a friend.
 - **Join**: pick JOIN, type the 6-char code, confirm your fighter. The host then presses
   ENTER to start the match.
+- **Controls (online, both sides)**: WASD move/jump, `L-Shift` block, `R` attack, `F` special.
+  Both host and guest use the P1 scheme on their physical keyboard regardless of which
+  fighter index they own — the netcode routes inputs to the correct fighter on each client.
 - **ESC** in any state returns to the main menu and tears down the connection.
 
 Online play needs the page hosted on a real URL (Netlify Drop / GitHub Pages) — the
