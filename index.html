@@ -4889,48 +4889,36 @@
     }
   }
 
-  function loop() {
+  // One fixed-rate simulation tick. Returns true if the sim advanced this call,
+  // false if we're waiting on a remote frame (lockstep) or not in PLAY.
+  function stepSim() {
+    if (state !== STATE.PLAY) return false;
+    if (!stepNetworkFrame()) return false;
+    tickPendingSpawns();
+    for (const f of fighters) f.update();
+    updateProjectiles();
+    resolveMelee();
+    updateCamera();
+    // Online: every 60 frames, exchange a state hash with the peer.
+    if (net.mode !== 'local' && net.connected && net.currentFrame > 0 && net.currentFrame % 60 === 0) {
+      const h = computeStateHash();
+      net.hashHistory.set(net.currentFrame, h);
+      try { net.conn && net.conn.send({ t: 'hash', frame: net.currentFrame, hash: h }); } catch (e) {}
+      for (const k of net.hashHistory.keys()) if (k < net.currentFrame - 600) net.hashHistory.delete(k);
+    }
+    const alive = fighters.filter(f => f.stocks > 0);
+    if (alive.length === 1 && !winner) {
+      winner = alive[0];
+      state = STATE.OVER;
+    }
+    return true;
+  }
+
+  function renderFrame() {
     if (state === STATE.MENU) {
       drawMenu();
       updateMenu();
     } else if (state === STATE.PLAY) {
-      // Build the per-frame input snapshot. In local mode this is just the
-      // current keyboard state; in online mode the netcode swaps in remote inputs.
-      if (!stepNetworkFrame()) {
-        // Lockstep is waiting on a remote frame — render the last state and bail
-        // until inputs arrive.
-        drawBackdrop(); applyCamera(); drawStage(); drawProjectiles();
-        for (const f of fighters) f.render(ctx);
-        drawEffects(); releaseCamera(); drawOffstageIndicators(); drawHUD();
-        drawNetOverlay();
-        requestAnimationFrame(loop);
-        return;
-      }
-      // update — tick frame-counter spawns first so windup → projectile spawn
-      // happens deterministically each frame.
-      tickPendingSpawns();
-      for (const f of fighters) f.update();
-      updateProjectiles();
-      resolveMelee();
-      updateCamera();
-
-      // Online: every 60 frames, exchange a state hash with the peer.
-      if (net.mode !== 'local' && net.connected && net.currentFrame > 0 && net.currentFrame % 60 === 0) {
-        const h = computeStateHash();
-        net.hashHistory.set(net.currentFrame, h);
-        try { net.conn && net.conn.send({ t: 'hash', frame: net.currentFrame, hash: h }); } catch (e) {}
-        // Trim old entries
-        for (const k of net.hashHistory.keys()) if (k < net.currentFrame - 600) net.hashHistory.delete(k);
-      }
-
-      // check victory
-      const alive = fighters.filter(f => f.stocks > 0);
-      if (alive.length === 1 && !winner) {
-        winner = alive[0];
-        state = STATE.OVER;
-      }
-
-      // render
       drawBackdrop();
       applyCamera();
       drawStage();
@@ -4953,7 +4941,6 @@
       drawHUD();
       drawNetOverlay();
       drawGameOver();
-
       if (keys['Enter']) {
         state = STATE.MENU;
         menuConfirm = [false, false];
@@ -4963,22 +4950,58 @@
         net.mode = 'local';
       }
     }
-
-    // Global ESC: leave match (or any non-menu screen) back to the main menu.
-    if (keys['Escape']) {
-      if (state !== STATE.MENU) {
-        state = STATE.MENU;
-        menuConfirm = [false, false];
-        menuStage = 'mode';
-        winner = null;
-        netCleanup();
-        net.mode = 'local';
-      }
+    if (keys['Escape'] && state !== STATE.MENU) {
+      state = STATE.MENU;
+      menuConfirm = [false, false];
+      menuStage = 'mode';
+      winner = null;
+      netCleanup();
+      net.mode = 'local';
     }
+  }
 
+  // Fixed-timestep accumulator: pin sim to 60Hz regardless of display refresh
+  // (60 / 120 / 144 / 240 Hz monitors all play at the same speed). Render runs
+  // once per vsync; sim catches up via 1..MAX_STEPS_PER_FRAME ticks.
+  const SIM_STEP_MS = 1000 / 60;
+  const MAX_STEPS_PER_FRAME = 5; // prevents the spiral-of-death after long stalls
+  let _simAccumulator = 0;
+  let _simLastTime = -1;
+
+  function loop(now) {
+    // Test path: tests call loop() with no arg and expect single-step semantics.
+    if (now === undefined) {
+      stepSim();
+      renderFrame();
+      return;
+    }
+    if (state !== STATE.PLAY) {
+      // Menus and post-match screens render once per rAF, no sim ticking.
+      _simAccumulator = 0;
+      _simLastTime = now;
+      renderFrame();
+      requestAnimationFrame(loop);
+      return;
+    }
+    if (_simLastTime < 0) _simLastTime = now - SIM_STEP_MS;
+    // Clamp dt to >= 0 (defensive vs clock skew) and to <= 250ms (tab-backgrounded stalls)
+    const dt = Math.max(0, Math.min(now - _simLastTime, 250));
+    _simLastTime = now;
+    _simAccumulator += dt;
+
+    let steps = 0;
+    while (_simAccumulator >= SIM_STEP_MS && steps < MAX_STEPS_PER_FRAME) {
+      const advanced = stepSim();
+      if (!advanced) break; // lockstep wait — keep accumulator for catch-up next rAF
+      _simAccumulator -= SIM_STEP_MS;
+      steps++;
+    }
+    if (steps >= MAX_STEPS_PER_FRAME) _simAccumulator = 0; // give up catching up
+
+    renderFrame();
     requestAnimationFrame(loop);
   }
 
-  loop();
+  requestAnimationFrame(loop);
 })();
 </script>
