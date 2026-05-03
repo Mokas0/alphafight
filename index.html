@@ -3697,8 +3697,12 @@
         }
       }
 
-      // off-screen
-      if (p.x < -100 || p.x > W + 100) p.life = 0;
+      // off-screen — use world bounds (BLAST_LEFT/RIGHT) since p.x is a WORLD
+      // coordinate. The previous check compared world-x against canvas-width W,
+      // which culled projectiles at world x ≈ 1060 — well inside the stage. Now
+      // we keep a 200px buffer past each blastzone so projectiles can travel
+      // their full life without disappearing mid-air.
+      if (p.x + p.w < BLAST_LEFT - 200 || p.x > BLAST_RIGHT + 200) p.life = 0;
 
       // collide with fighters
       for (const f of fighters) {
