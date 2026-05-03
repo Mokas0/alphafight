@@ -29,11 +29,19 @@
 
   // ---------- INPUT ----------
   const keys = {};
+  // Press latch — set on keydown, persists until the next sim frame's input read
+  // consumes it, then cleared. Without this, a quick tap (keydown + keyup both
+  // firing between two sim frames) would be missed because keys[code] reads false
+  // by the time the next frame runs. Symptom: specials sometimes don't fire.
+  const keyPressLatch = {};
   window.addEventListener('keydown', e => {
     keys[e.code] = true;
+    keyPressLatch[e.code] = true;
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
   });
   window.addEventListener('keyup', e => { keys[e.code] = false; });
+  function isHeld(code) { return !!(keys[code] || keyPressLatch[code]); }
+  function consumeKeyLatch() { for (const k in keyPressLatch) delete keyPressLatch[k]; }
 
   // ---------- GAME STATE ----------
   const STATE = { MENU: 0, PLAY: 1, OVER: 2 };
@@ -3416,10 +3424,12 @@
   const frameKeys = {};
   const INPUT_BTNS = ['left', 'right', 'up', 'down', 'block', 'special', 'attack'];
   function snapshotInputsLocal() {
-    // Local 2P: copy all keys that appear in either control map.
+    // Local 2P: copy all keys that appear in either control map. Reads from the
+    // press latch too so quick taps (keydown+keyup between two sim frames) still
+    // fire the move.
     for (let i = 0; i < 2; i++) {
       const c = controls[i];
-      for (const b of INPUT_BTNS) frameKeys[c[b]] = !!keys[c[b]];
+      for (const b of INPUT_BTNS) frameKeys[c[b]] = isHeld(c[b]);
     }
   }
   // Capture the local player's inputs as a 7-bit mask for sending over the wire.
@@ -3430,7 +3440,7 @@
     const c = controls[0];
     let mask = 0;
     for (let i = 0; i < INPUT_BTNS.length; i++) {
-      if (keys[c[INPUT_BTNS[i]]]) mask |= (1 << i);
+      if (isHeld(c[INPUT_BTNS[i]])) mask |= (1 << i);
     }
     return mask;
   }
@@ -4472,7 +4482,7 @@
   function updateMenu() {
     const c0 = controls[0];
     const c1 = controls[1];
-    const tap = (code) => keys[code] && !menuPrevKeys[code];
+    const tap = (code) => isHeld(code) && !menuPrevKeys[code];
 
     if (menuStage === 'mode') {
       // P1 cycles between LOCAL/HOST/JOIN with left/right, confirms with special.
@@ -4572,6 +4582,7 @@
     }
 
     menuPrevKeys = { ...keys };
+    consumeKeyLatch();
   }
 
   function drawMenu() {
@@ -4949,6 +4960,8 @@
       winner = alive[0];
       state = STATE.OVER;
     }
+    // Latch consumed — sim frame advanced, any tap-from-this-rAF is now used up.
+    consumeKeyLatch();
     return true;
   }
 
