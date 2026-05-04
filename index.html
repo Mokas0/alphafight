@@ -218,9 +218,20 @@
       jumpPower: 12.0,
       weight: 1.05,
       description: 'Coal-themed pyromaniac. Fuel system: spray, ignite, combo for big damage.',
+    },
+    angus: {
+      name: 'Angus',
+      color: '#0d4f1c',
+      color2: '#39ff14',
+      archetype: 'Hacker',
+      walkSpeed: 3.3,
+      dashSpeed: 5.1,
+      jumpPower: 12.0,
+      weight: 0.95,
+      description: 'Computer nerd. Code meter charges from damage taken; fuels traps and dashes.',
     }
   };
-  const CHAR_KEYS = ['nico', 'derek', 'rhys', 'greyson', 'kele', 'jonah', 'theo', 'cole'];
+  const CHAR_KEYS = ['nico', 'derek', 'rhys', 'greyson', 'kele', 'jonah', 'theo', 'cole', 'angus'];
 
   // ---------- CONTROL MAPS ----------
   const controls = [
@@ -294,6 +305,10 @@
       this.fueled = 0;       // frames of gasoline-doused status remaining (any fighter)
       this.fueledTick = 0;
       this.rocketHeld = false; // tracks rocket-boost button hold for Cole
+      // Angus's "code" meter (0..100): gained from taking damage, spent on
+      // disrupter platforms and HTML dashes. Reset on death.
+      this.code = 0;
+      this.maxCode = 100;
 
       // inputs
       this.prevSpecial = false;
@@ -360,6 +375,11 @@
         return true;
       }
       this.damage += amount;
+      // Angus gains "code" from taking damage — 2 code per damage point, capped.
+      if (this.key === 'angus') {
+        this.code = Math.min(this.maxCode, this.code + amount * 2);
+        spawnEffect(this.cx, this.cy, '#39ff14', 18, 24);
+      }
       // knockback scales with damage (SSB-style)
       const scale = 1 + this.damage / 60;
       this.knockback.x = kbx * scale / this.def.weight;
@@ -473,7 +493,8 @@
       else if (this.key === 'kele') this.keleSpecial(dir);
       else if (this.key === 'jonah') this.jonahSpecial(dir);
       else if (this.key === 'theo') this.theoSpecial(dir);
-      else this.coleSpecial(dir);
+      else if (this.key === 'cole') this.coleSpecial(dir);
+      else this.angusSpecial(dir);
     }
 
     startAttack(dir) {
@@ -603,10 +624,14 @@
     // --- RHYS SPECIALS ---
     rhysSpecial(dir) {
       if (dir === 'neutral') {
-        // Toxic Headbutt — Luigi's Green Missile-style charging projectile-body
-        // Locks movement during a short windup then launches Rhys horizontally with a hitbox.
-        this.moveState = { type: 'toxHeadbutt', timer: 38, launched: false, hasHit: null };
-        // Brief windup: during frames 30..20 of timer Rhys is stationary; then launch.
+        // Toxic Punch (NEUTRAL — was previously side) — heaviest punch, KB scales
+        // with current horizontal speed. Requires Rhys to be moving to hit hardest.
+        this.moveState = {
+          type: 'toxPunch', timer: 24, active: [6, 14],
+          punchSpeed: Math.abs(this.vx),
+          hasHit: null,
+        };
+        this.vx += this.facing * 1.5;
       } else if (dir === 'up') {
         // Poison Lob — throws a poison bomb straight up that falls and splashes
         this.moveState = { type: 'poisonLob', timer: 20 };
@@ -619,16 +644,10 @@
           });
         });
       } else if (dir === 'side') {
-        // Toxic Punch — heaviest punch, knockback scales with current horizontal speed
-        // Requires Rhys to be moving to hit hardest. Short startup, short active window.
-        this.moveState = {
-          type: 'toxPunch', timer: 24, active: [6, 14],
-          // Snapshot speed at move start — that's the "momentum bonus" for the punch.
-          punchSpeed: Math.abs(this.vx),
-          hasHit: null,
-        };
-        // Preserve momentum; don't zero vx. Small forward boost on startup.
-        this.vx += this.facing * 1.5;
+        // Toxic Headbutt (SIDE — was previously neutral) — Green-Missile-style
+        // charging projectile-body. Locks movement during windup, then launches
+        // Rhys horizontally with a body hitbox.
+        this.moveState = { type: 'toxHeadbutt', timer: 38, launched: false, hasHit: null };
       } else if (dir === 'down') {
         // Spore Trap — sets a stationary trap on the ground below Rhys
         this.moveState = { type: 'sporeTrap', timer: 24 };
@@ -915,6 +934,65 @@
       }
     }
 
+    // --- ANGUS SPECIALS ---
+    // Computer nerd. Code meter (0..100) charges from damage taken; spent on
+    // disrupter platforms and HTML dashes. Down-special channels max code over 3s.
+    angusSpecial(dir) {
+      if (dir === 'neutral') {
+        // Code Disrupter — costs 25 code, spawns a temporary platform in front.
+        if (this.code < 25) {
+          this.attackCooldown = 8;
+          spawnEffect(this.cx, this.cy, '#a34040', 14, 14);
+          return;
+        }
+        this.code -= 25;
+        this.moveState = { type: 'codeDisrupter', timer: 26 };
+        const fwd = this.facing;
+        const baseY = this.y + this.h * 0.4; // place at ~mid-body of Angus
+        delaySpawn(6, () => {
+          projectiles.push({
+            owner: this, x: this.cx + fwd * 24, y: baseY,
+            vx: 0, vy: 0, w: 110, h: 8,
+            life: 300, damage: 0, kbx: 0, kby: 0,
+            type: 'codePlatform', gravity: 0, tick: 0, isPlatform: true,
+          });
+          spawnEffect(this.cx + fwd * 60, baseY + 4, '#39ff14', 22, 36);
+        });
+      } else if (dir === 'up') {
+        // Grappling Hook — fires a hook upward+forward; on contact with an
+        // enemy, pulls them toward Angus. On contact with anything else (or
+        // expiry), pulls Angus toward the hook point (recovery).
+        this.moveState = { type: 'grappleHook', timer: 30 };
+        const fwd = this.facing;
+        delaySpawn(4, () => {
+          projectiles.push({
+            owner: this, x: this.cx + fwd * 8, y: this.cy - 8,
+            vx: fwd * 9, vy: -11, w: 10, h: 10,
+            life: 30, damage: 4, kbx: 0, kby: -3,
+            type: 'grapple', gravity: 0,
+          });
+        });
+      } else if (dir === 'side') {
+        // HTML Dash — costs 20 code, fast directional dash. Each frame the
+        // dash re-reads directional inputs to redirect the velocity vector.
+        if (this.code < 20) {
+          this.attackCooldown = 8;
+          spawnEffect(this.cx + this.facing * 14, this.cy, '#a34040', 14, 12);
+          return;
+        }
+        this.code -= 20;
+        this.moveState = { type: 'htmlDash', timer: 22 };
+        this.invuln = 10;
+        // Initial vector based on directional keys (defaults to facing)
+        this.vx = this.facing * 12;
+        this.vy = 0;
+      } else if (dir === 'down') {
+        // Code Farm — channel for 3 seconds; fills code meter to max over the
+        // duration. Vulnerable; no super armor.
+        this.moveState = { type: 'codeFarm', timer: 180, startCode: this.code };
+      }
+    }
+
     update() {
       if (this.respawnTimer > 0) {
         this.respawnTimer--;
@@ -940,6 +1018,8 @@
             'glide',       // Jonah up-special (recovery)
             'teleport',    // Theo up-special
             'rocketBoost', // Cole up-special
+            'htmlDash',    // Angus side-special
+            'grappleHook', // Angus up-special (recovery)
           ]);
           if (propelMoves.has(this.moveState.type) && !this.onGround) {
             this.helpless = true;
@@ -961,6 +1041,8 @@
             uppercut: 10,
             teleport: 10,
             rocketBoost: 14,
+            htmlDash: 16,
+            grappleHook: 10,
           };
           const lag = endlagMap[this.moveState.type];
           if (lag) {
@@ -985,7 +1067,7 @@
       else { this.airTime++; this.groundTime = 0; }
       // Capture afterimage silhouette for fast movers — every character gets one,
       // tinted to their identity. Heavy / slow fighters rarely cross the threshold.
-      const dashRx = /burnDash|katanaUp|mach5|ultraSpike|toxHeadbutt|megaJump|uppercut|teleport/;
+      const dashRx = /burnDash|katanaUp|mach5|ultraSpike|toxHeadbutt|megaJump|uppercut|teleport|htmlDash/;
       if (Math.abs(this.vx) > 4 || (this.moveState && dashRx.test(this.moveState.type))) {
         this.afterimages.push({ x: this.x, y: this.y, life: 8 });
         if (this.afterimages.length > 5) this.afterimages.shift();
@@ -1200,7 +1282,45 @@
             this.rocketHeld = false;
           }
         }
-        // Theo: Charge Bomb — accumulate charge while special held, detonate on release or auto-cap.
+        // Angus: HTML Dash — re-read directional inputs each frame to redirect
+        if (this.moveState && this.moveState.type === 'htmlDash') {
+          const ctrl = controls[this.index];
+          let dx = 0, dy = 0;
+          if (frameKeys[ctrl.left]) dx -= 1;
+          if (frameKeys[ctrl.right]) dx += 1;
+          if (frameKeys[ctrl.up]) dy -= 1;
+          if (frameKeys[ctrl.down]) dy += 1;
+          if (dx === 0 && dy === 0) { dx = this.facing; dy = 0; }
+          const mag = Math.hypot(dx, dy) || 1;
+          const speed = 12;
+          this.vx = (dx / mag) * speed;
+          this.vy = (dy / mag) * speed;
+          if (this.vx > 0.5) this.facing = 1;
+          else if (this.vx < -0.5) this.facing = -1;
+          // Code-stream trail
+          if (Math.random() < 0.7) {
+            spawnEffect(this.cx + (Math.random()-0.5)*16, this.cy + (Math.random()-0.5)*30, '#39ff14', 14, 8);
+          }
+          if (Math.random() < 0.4) {
+            spawnEffect(this.cx + (Math.random()-0.5)*24, this.cy + (Math.random()-0.5)*36, '#0d4f1c', 16, 10);
+          }
+        }
+        // Angus: Code Farm — channel; fills code meter linearly over the duration.
+        if (this.moveState && this.moveState.type === 'codeFarm') {
+          if (this.onGround) this.vx *= 0.4;
+          const m = this.moveState;
+          const elapsed = 180 - m.timer;
+          const target = Math.min(this.maxCode, m.startCode + (this.maxCode - m.startCode) * (elapsed / 180));
+          this.code = Math.max(this.code, target); // monotonic — fills toward max even if startCode was high
+          if (m.timer % 4 === 0) {
+            for (let k = 0; k < 2; k++) {
+              spawnEffect(this.cx + (Math.random()-0.5)*40, this.cy + (Math.random()-0.5)*50, '#39ff14', 18, 10);
+            }
+          }
+        }
+        // Theo: Charge Bomb — accumulate charge while special held; on release,
+        // launch a flying orb projectile carrying the stored charge. Detonation
+        // happens when the orb hits a fighter or an obstacle.
         if (this.moveState && this.moveState.type === 'chargeBomb') {
           const ctrl = controls[this.index];
           if (this.onGround) this.vx *= 0.4;
@@ -1216,10 +1336,17 @@
                             m.charge > 60 ? '#4ad7e8' : '#8a4ade', 10, 6);
               }
             } else {
-              // Released (or charge maxed at 90) — detonate
+              // Released (or charge auto-capped at 90) — fire a projectile.
               m.released = true;
-              detonateChargeBomb(this, m.charge);
-              m.timer = Math.min(m.timer, 10);
+              const fwd = this.facing;
+              projectiles.push({
+                owner: this, x: this.cx + fwd * 16, y: this.cy - 6,
+                vx: fwd * 9, vy: -3, w: 14 + (m.charge / 90) * 10, h: 14 + (m.charge / 90) * 10,
+                life: 100, damage: 0, kbx: 0, kby: 0,
+                type: 'chargedOrb', gravity: 0.18, charge: m.charge, spin: 0,
+              });
+              spawnEffect(this.cx + fwd * 16, this.cy - 6, '#4ad7e8', 16, 22);
+              m.timer = Math.min(m.timer, 12);
             }
           }
         }
@@ -1327,9 +1454,17 @@
         return; // skip rest of update while hanging
       }
 
-      // Collide with platforms
+      // Collide with platforms (static stage platforms + temporary code platforms)
       let grounded = false;
-      for (const p of platforms) {
+      // Build the list of solid platform-like surfaces this frame: stage + any
+      // active codePlatform projectiles (Angus's neutral special).
+      const platformList = platforms.slice();
+      for (const proj of projectiles) {
+        if (proj.type === 'codePlatform' && proj.life > 0) {
+          platformList.push({ x: proj.x, y: proj.y, w: proj.w, h: proj.h, solid: true });
+        }
+      }
+      for (const p of platformList) {
         if (!p.solid) continue;
         // Top-surface collision (when falling onto a platform from above)
         if (this.vy >= 0) {
@@ -1431,10 +1566,28 @@
       this.fueled = 0;
       this.fueledTick = 0;
       this.fuel = this.maxFuel;
-      // Death flash at the edge of the visible blastzone, in world coords
-      spawnEffect(Math.max(BLAST_LEFT + 20, Math.min(BLAST_RIGHT - 20, this.cx)),
-                  Math.max(BLAST_TOP + 20, Math.min(BLAST_BOTTOM - 20, this.cy)),
-                  '#ff4444', 30, 40);
+      this.code = 0;
+      // Death explosion — multi-layer cinematic burst at the edge of the blastzone.
+      const ex = Math.max(BLAST_LEFT + 20, Math.min(BLAST_RIGHT - 20, this.cx));
+      const ey = Math.max(BLAST_TOP + 20, Math.min(BLAST_BOTTOM - 20, this.cy));
+      // Concentric expanding rings (white core → yellow → orange → red)
+      spawnEffect(ex, ey, '#ffffff', 18, 36);
+      spawnEffect(ex, ey, '#ffeb3b', 26, 64);
+      spawnEffect(ex, ey, '#ff9a2a', 34, 96);
+      spawnEffect(ex, ey, '#ff4444', 42, 130);
+      spawnEffect(ex, ey, '#a34040', 48, 170);
+      // 8-pointed star spokes
+      for (let k = 0; k < 8; k++) {
+        const ang = k * (Math.PI / 4);
+        spawnEffect(ex + Math.cos(ang) * 50, ey + Math.sin(ang) * 50, '#ffeb3b', 22, 22);
+      }
+      // Debris particles in the dying fighter's colors
+      for (let k = 0; k < 14; k++) {
+        const ang = (k / 14) * Math.PI * 2 + Math.random() * 0.4;
+        const dist = 30 + Math.random() * 80;
+        spawnEffect(ex + Math.cos(ang) * dist, ey + Math.sin(ang) * dist,
+                    k % 2 ? this.def.color : this.def.color2, 28, 10 + Math.random() * 6);
+      }
       if (this.stocks <= 0) {
         this.x = -9999; this.y = -9999;
         return;
@@ -1622,6 +1775,8 @@
         kele:    'rgba(163, 64, 64, ',
         jonah:   'rgba(224, 112, 176, ',
         theo:    'rgba(138, 74, 222, ',
+        cole:    'rgba(255, 138, 58, ',
+        angus:   'rgba(57, 255, 20, ',
       };
       if (this.afterimages.length > 0) {
         const tint = aiTints[this.key];
@@ -1918,6 +2073,45 @@
         ctx.fillStyle = '#3a1a1a';
         ctx.fillRect(bodyX + bodyW * 0.18, bodyY + bodyH * 0.21, bodyW * 0.64, 3);
       }
+      // Angus — chunky thick-rimmed glasses + headphones + scrolling code symbols around body
+      if (this.key === 'angus') {
+        const t = this.animTick * 0.1;
+        // Glasses (two square frames over the eyes)
+        ctx.fillStyle = '#000';
+        ctx.fillRect(bodyX + bodyW * 0.18, bodyY + 6, 6, 5);
+        ctx.fillRect(bodyX + bodyW * 0.62, bodyY + 6, 6, 5);
+        ctx.strokeStyle = '#39ff14';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(bodyX + bodyW * 0.18, bodyY + 6, 6, 5);
+        ctx.strokeRect(bodyX + bodyW * 0.62, bodyY + 6, 6, 5);
+        // Bridge between glasses
+        ctx.strokeStyle = '#000';
+        ctx.beginPath();
+        ctx.moveTo(bodyX + bodyW * 0.30, bodyY + 8);
+        ctx.lineTo(bodyX + bodyW * 0.62, bodyY + 8);
+        ctx.stroke();
+        // Headphones — black band over the head + dark cups on the sides
+        ctx.fillStyle = '#222222';
+        ctx.fillRect(bodyX + bodyW * 0.10, bodyY - 2, bodyW * 0.80, 3);
+        ctx.fillRect(bodyX - 2, bodyY + 1, 4, 8);
+        ctx.fillRect(bodyX + bodyW - 2, bodyY + 1, 4, 8);
+        // Scrolling code symbols floating around body
+        const codeLevel = Math.min(1, this.code / this.maxCode);
+        if (codeLevel > 0.05) {
+          const symbols = ['{}', '<>', '[]', '01', '#&', '/*'];
+          ctx.fillStyle = `rgba(57, 255, 20, ${0.4 + codeLevel * 0.5})`;
+          ctx.font = 'bold 8px monospace';
+          ctx.textAlign = 'center';
+          for (let k = 0; k < 3; k++) {
+            const ang = t + k * (Math.PI * 2 / 3);
+            const r = bodyW * 0.7 + Math.sin(t * 1.3 + k) * 4;
+            const sx = bodyX + bodyW/2 + Math.cos(ang) * r;
+            const sy = bodyY + bodyH * 0.55 + Math.sin(ang) * (bodyH * 0.35);
+            ctx.fillText(symbols[(k + (this.animTick / 30 | 0)) % symbols.length], sx, sy);
+          }
+          ctx.textAlign = 'left';
+        }
+      }
       // Cole — coal-miner hardhat with a headlamp + sooty face streaks + glowing pilot ember
       if (this.key === 'cole') {
         // Hardhat (orange) with a darker brim
@@ -2200,6 +2394,7 @@
               jonah: { main: '#e070b0', hot: '#a0e0d0' },
               theo: { main: '#8a4ade', hot: '#4ad7e8' },
               cole: { main: '#ff8a3a', hot: '#ffeb3b' },
+              angus: { main: '#39ff14', hot: '#aaffaa' },
             };
             const { main: mainColor, hot: hotColor } = palettes[this.key] || { main: '#ffffff', hot: '#ffffff' };
             // filled swipe shape
@@ -3519,8 +3714,11 @@
   }
 
   // Theo's Charge Bomb detonation. Damage and radius scale with charge held.
-  function detonateChargeBomb(owner, charge) {
-    const cx = owner.cx, cy = owner.cy;
+  // cx/cy default to the owner's position (legacy callers); projectile impacts
+  // pass the impact coords explicitly.
+  function detonateChargeBomb(owner, charge, cxOverride, cyOverride) {
+    const cx = (cxOverride != null) ? cxOverride : owner.cx;
+    const cy = (cyOverride != null) ? cyOverride : owner.cy;
     const t = Math.max(0, Math.min(1, charge / 90));
     const dmg = 7 + t * 18;          // 7 → 25
     const radius = 55 + t * 65;       // 55 → 120
@@ -3633,6 +3831,24 @@
       // Cole projectiles: molotov + igniter spin, fire patch ignites adjacent gasoline puddles
       if (p.type === 'molotov') p.spin = (p.spin || 0) + 0.4;
       if (p.type === 'igniter') p.spin = (p.spin || 0) + 0.55;
+      if (p.type === 'chargedOrb') p.spin = (p.spin || 0) + 0.35;
+      // Angus grapple — when the hook reaches end-of-life without catching
+      // anyone, yank Angus toward the hook's last position (recovery boost).
+      if (p.type === 'grapple' && p.life === 1 && !p.consumed) {
+        p.consumed = true;
+        const owner = p.owner;
+        if (owner && owner.respawnTimer === 0) {
+          const dx = (p.x + p.w/2) - owner.cx;
+          const dy = (p.y + p.h/2) - owner.cy;
+          const dist = Math.hypot(dx, dy) || 1;
+          owner.vx = (dx / dist) * 11;
+          owner.vy = (dy / dist) * 13;
+          owner.helpless = false; // boost gives a fresh launch
+          owner.jumps = Math.max(owner.jumps, 1);
+          spawnEffect(owner.cx, owner.cy, '#39ff14', 20, 28);
+          spawnEffect(p.x + p.w/2, p.y + p.h/2, '#39ff14', 18, 24);
+        }
+      }
       if (p.type === 'firePatch') {
         // Spread to any gasoline puddles we overlap each frame
         for (const q of projectiles) {
@@ -3691,6 +3907,24 @@
           // Spark on ground impact — light puddles + detonate fueled enemies in splash
           igniterSpark(p.x + p.w/2, GROUND_Y - 4, p.owner, 80);
           p.life = 0;
+        } else if (p.type === 'chargedOrb') {
+          // Detonate at impact point (charge stored on the projectile)
+          detonateChargeBomb(p.owner, p.charge, p.x + p.w/2, GROUND_Y - 4);
+          p.life = 0;
+        } else if (p.type === 'fireball') {
+          // Bounce a few times, dampening each time, then despawn.
+          if ((p.bounces || 0) >= 3) {
+            p.life = 0;
+            spawnEffect(p.x + p.w/2, p.y + p.h, '#ffaa33', 14, 20);
+            spawnEffect(p.x + p.w/2, p.y + p.h, '#ff6a2a', 12, 26);
+          } else {
+            p.y = GROUND_Y - p.h;
+            p.vy = -Math.abs(p.vy) * 0.6 - 1; // give it a little kick on bounce
+            p.vx *= 0.92;
+            p.bounces = (p.bounces || 0) + 1;
+            spawnEffect(p.x + p.w/2, p.y + p.h, '#ffaa33', 10, 14);
+            spawnEffect(p.x + p.w/2, p.y + p.h, '#ff6a2a', 8, 18);
+          }
         } else {
           p.life = 0;
           spawnEffect(p.x + p.w/2, p.y + p.h, '#ffaa33', 12, 14);
@@ -3764,6 +3998,31 @@
             // Spray particle directly hits an enemy — apply fueled, no damage, despawn.
             f.applyFuel(240);
             spawnEffect(f.cx, f.cy, '#5a4028', 18, 22);
+            p.life = 0;
+            break;
+          } else if (p.type === 'chargedOrb') {
+            // Direct hit detonates at the impact point with the stored charge
+            detonateChargeBomb(p.owner, p.charge, p.x + p.w/2, p.y + p.h/2);
+            p.life = 0;
+            break;
+          } else if (p.type === 'grapple') {
+            // Hook caught a fighter — yank them toward Angus.
+            if (f.counterActive > 0) {
+              p.owner.takeDamage(p.damage * 1.5, -p.vx * 1.5, -4, f);
+              spawnEffect(f.cx, f.cy, '#ffffff', 20, 36);
+              f.counterActive = 0; f.counterCooldown = 60;
+              p.life = 0;
+              break;
+            }
+            f.takeDamage(p.damage, 0, -2, p.owner);
+            // Pull vector from fighter toward Angus
+            const ax = p.owner.cx, ay = p.owner.cy;
+            const dx = ax - f.cx, dy = ay - f.cy;
+            const dist = Math.hypot(dx, dy) || 1;
+            f.vx = (dx / dist) * 14;
+            f.vy = (dy / dist) * 14;
+            spawnEffect(f.cx, f.cy, '#39ff14', 22, 26);
+            spawnEffect((f.cx + ax) / 2, (f.cy + ay) / 2, '#39ff14', 18, 16);
             p.life = 0;
             break;
           } else if (p.type === 'igniter') {
@@ -4208,6 +4467,87 @@
                   10 + Math.sin(p.tick * 0.15 + i) * 3, 0, Math.PI*2);
           ctx.fill();
         }
+      } else if (p.type === 'codePlatform') {
+        // Code-stream platform: glowing green bar with scrolling text effect
+        ctx.fillStyle = `rgba(57, 255, 20, ${0.25 + Math.sin(p.tick * 0.15) * 0.08})`;
+        ctx.fillRect(p.x - 4, p.y - 2, p.w + 8, p.h + 4);
+        ctx.fillStyle = '#0d4f1c';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#39ff14';
+        ctx.fillRect(p.x, p.y, p.w, 2);
+        ctx.fillStyle = '#39ff14';
+        ctx.font = 'bold 8px monospace';
+        ctx.textAlign = 'center';
+        const symbols = ['{', '}', '/', '<', '>', '[', ']', '#', '&', '*'];
+        for (let k = 0; k < Math.floor(p.w / 12); k++) {
+          const sx = p.x + 6 + k * 12 + (p.tick * 0.4) % 12;
+          if (sx < p.x + p.w - 4) {
+            ctx.fillText(symbols[(k + (p.tick / 8 | 0)) % symbols.length], sx, p.y + 7);
+          }
+        }
+        ctx.textAlign = 'left';
+        if (p.life < 60) {
+          const flash = (p.life % 8) < 4 ? 0.4 : 0.1;
+          ctx.fillStyle = `rgba(255, 80, 80, ${flash})`;
+          ctx.fillRect(p.x, p.y, p.w, p.h);
+        }
+      } else if (p.type === 'grapple') {
+        const owner = p.owner;
+        if (owner && owner.respawnTimer === 0) {
+          ctx.strokeStyle = '#39ff14';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(owner.cx, owner.cy);
+          ctx.lineTo(p.x + p.w/2, p.y + p.h/2);
+          ctx.stroke();
+          ctx.strokeStyle = 'rgba(57, 255, 20, 0.5)';
+          ctx.lineWidth = 1;
+          ctx.setLineDash([4, 3]);
+          ctx.beginPath();
+          ctx.moveTo(owner.cx, owner.cy);
+          ctx.lineTo(p.x + p.w/2, p.y + p.h/2);
+          ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        ctx.fillStyle = '#0d4f1c';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#39ff14';
+        ctx.fillRect(p.x + 1, p.y + 1, p.w - 2, p.h - 2);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(p.x + 3, p.y + 3, p.w - 6, p.h - 6);
+      } else if (p.type === 'chargedOrb') {
+        // Concentric purple/cyan orb with white-hot core, charge ratio
+        const cx = p.x + p.w/2, cy = p.y + p.h/2;
+        const r = p.w / 2;
+        const t = Math.max(0, Math.min(1, (p.charge || 0) / 90));
+        // Outer halo
+        ctx.fillStyle = `rgba(74, 215, 232, ${0.3 + t * 0.3})`;
+        ctx.beginPath(); ctx.arc(cx, cy, r + 6, 0, Math.PI*2); ctx.fill();
+        // Purple core
+        ctx.fillStyle = '#8a4ade';
+        ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.fill();
+        // Cyan inner
+        ctx.fillStyle = '#4ad7e8';
+        ctx.beginPath(); ctx.arc(cx, cy, r * 0.65, 0, Math.PI*2); ctx.fill();
+        // White-hot center if charged
+        if (t > 0.5) {
+          ctx.fillStyle = '#ffffff';
+          ctx.beginPath();
+          ctx.arc(cx, cy, r * 0.35 * (t - 0.5) * 2, 0, Math.PI*2);
+          ctx.fill();
+        }
+        // Crackle when fully charged
+        if (t >= 1) {
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 1.5;
+          for (let k = 0; k < 3; k++) {
+            const ang = (p.spin || 0) + k * (Math.PI * 2 / 3);
+            ctx.beginPath();
+            ctx.moveTo(cx, cy);
+            ctx.lineTo(cx + Math.cos(ang) * (r + 6), cy + Math.sin(ang) * (r + 6));
+            ctx.stroke();
+          }
+        }
       } else if (p.type === 'laser') {
         // Energy beam — cyan outer halo, purple core, white-hot center
         ctx.fillStyle = 'rgba(74, 215, 232, 0.35)';
@@ -4472,6 +4812,17 @@
         ctx.font = 'bold 9px sans-serif';
         ctx.fillText('FUEL', baseX + 80, y + 28);
       }
+      // Angus-only: code meter (gained from damage taken, spent on platforms / dashes)
+      if (f.key === 'angus') {
+        const codeFrac = f.code / f.maxCode;
+        ctx.fillStyle = '#0a2010';
+        ctx.fillRect(baseX + 80, y + 30, 60, 6);
+        ctx.fillStyle = codeFrac >= 1 ? '#aaffaa' : '#39ff14';
+        ctx.fillRect(baseX + 80, y + 30, 60 * codeFrac, 6);
+        ctx.fillStyle = '#39ff14';
+        ctx.font = 'bold 9px monospace';
+        ctx.fillText('CODE ' + Math.floor(f.code), baseX + 80, y + 28);
+      }
 
       // Fueled (gasoline-doused) status — shown for any non-Cole fighter who's been doused
       if (f.fueled > 0 && f.key !== 'cole') {
@@ -4602,13 +4953,27 @@
   }
 
   function drawMenu() {
-    ctx.fillStyle = '#0f0f18';
+    // Vertical gradient backdrop instead of flat fill — feels less placeholder.
+    const bg = ctx.createLinearGradient(0, 0, 0, H);
+    bg.addColorStop(0, '#0a0a14');
+    bg.addColorStop(1, '#1a1a28');
+    ctx.fillStyle = bg;
     ctx.fillRect(0, 0, W, H);
+    // Subtle horizontal accent line under the title
+    ctx.strokeStyle = 'rgba(255, 106, 42, 0.4)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(120, 96); ctx.lineTo(W - 120, 96); ctx.stroke();
+    ctx.strokeStyle = 'rgba(74, 184, 255, 0.4)';
+    ctx.beginPath(); ctx.moveTo(220, 99); ctx.lineTo(W - 220, 99); ctx.stroke();
 
-    ctx.fillStyle = '#ff6a2a';
-    ctx.font = 'bold 48px sans-serif';
+    // Title — split-color "ALPHA BRAWL"
+    ctx.font = 'bold 52px sans-serif';
     ctx.textAlign = 'center';
-    ctx.fillText('ALPHA BRAWL', W/2, 80);
+    const titleY = 70;
+    ctx.fillStyle = '#ff6a2a';
+    ctx.fillText('ALPHA', W/2 - 90, titleY);
+    ctx.fillStyle = '#4ab8ff';
+    ctx.fillText('BRAWL', W/2 + 90, titleY);
     ctx.fillStyle = '#999';
     ctx.font = '14px sans-serif';
 
@@ -4683,7 +5048,8 @@
     // Dynamic card layout for any roster size
     const N = CHAR_KEYS.length;
     let cardW, cardH, gap;
-    if (N >= 8) { cardW = 104; cardH = 178; gap = 6; }
+    if (N >= 9) { cardW = 96; cardH = 168; gap = 5; }
+    else if (N >= 8) { cardW = 104; cardH = 178; gap = 6; }
     else if (N >= 7) { cardW = 118; cardH = 190; gap = 8; }
     else if (N >= 6) { cardW = 130; cardH = 200; gap = 10; }
     else if (N >= 5) { cardW = 150; cardH = 220; gap = 14; }
@@ -4693,56 +5059,120 @@
     const startX = (W - totalW) / 2 + cardW / 2;
     const cardCY = 290;
     const cardPositions = [];
+    // Pre-compute global max stats for relative bar scaling.
+    let maxWalk = 0, maxJump = 0, maxWeight = 0;
+    for (const k of CHAR_KEYS) {
+      const c = CHARS[k];
+      if (c.walkSpeed > maxWalk) maxWalk = c.walkSpeed;
+      if (c.jumpPower > maxJump) maxJump = c.jumpPower;
+      if (c.weight > maxWeight) maxWeight = c.weight;
+    }
+    const animT = Date.now() * 0.003;
+    // Whose cursor is visible (computed up here so the card-draw loop can
+    // tint selected cards). Local: both players; net: only the local-side player.
+    const showCursorFor = (net.mode === 'local') ? [true, true]
+                       : (net.mode === 'host')   ? [true, false]
+                                                 : [false, true];
     for (let c = 0; c < N; c++) {
       const cx = startX + c * (cardW + gap);
       cardPositions.push(cx);
       const ch = CHARS[CHAR_KEYS[c]];
 
-      ctx.fillStyle = '#1a1a28';
-      ctx.fillRect(cx - cardW/2, cardCY - cardH/2, cardW, cardH);
+      // Highlight cards selected by either local-controlled player.
+      const isSelP1 = (showCursorFor && showCursorFor[0] && menuSel[0] === c);
+      const isSelP2 = (showCursorFor && showCursorFor[1] && menuSel[1] === c);
+      const selected = isSelP1 || isSelP2;
+      const liftPx = selected ? Math.sin(animT * 2 + c) * 1.5 + 3 : 0;
+      const cardX = cx - cardW/2;
+      const cardY = cardCY - cardH/2 - liftPx;
+
+      // Soft drop shadow
+      ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
+      ctx.fillRect(cardX + 3, cardY + 5, cardW, cardH);
+
+      // Gradient backdrop (top dark → bottom slightly lighter, character-tinted)
+      const grad = ctx.createLinearGradient(0, cardY, 0, cardY + cardH);
+      grad.addColorStop(0, '#15151f');
+      grad.addColorStop(0.55, '#1a1a28');
+      grad.addColorStop(1, '#22223a');
+      ctx.fillStyle = grad;
+      ctx.fillRect(cardX, cardY, cardW, cardH);
+
+      // Top accent stripe in character color
+      ctx.fillStyle = ch.color;
+      ctx.fillRect(cardX, cardY, cardW, 4);
+
+      // Border (pulsing glow when selected)
       ctx.strokeStyle = ch.color;
-      ctx.lineWidth = 3;
-      ctx.strokeRect(cx - cardW/2, cardCY - cardH/2, cardW, cardH);
-
-      // character preview — scale figure to card width
-      const figW = cardW < 170 ? 38 : 48;
-      const figH = cardW < 170 ? 68 : 86;
-      const headW = cardW < 170 ? 22 : 28;
-      const headH = cardW < 170 ? 16 : 20;
-      ctx.fillStyle = ch.color;
-      ctx.fillRect(cx - figW/2, cardCY - 60, figW, figH);
-      ctx.fillStyle = ch.color2;
-      ctx.fillRect(cx - figW/2, cardCY - 34, figW, 10);
-      ctx.fillStyle = '#ffddba';
-      ctx.fillRect(cx - headW/2, cardCY - 72, headW, headH);
-      ctx.fillStyle = '#222';
-      ctx.fillRect(cx + 2, cardCY - 64, 4, 4);
-      ctx.fillRect(cx - 6, cardCY - 64, 4, 4);
-
-      ctx.fillStyle = ch.color;
-      ctx.font = cardW < 170 ? 'bold 16px sans-serif' : 'bold 20px sans-serif';
-      ctx.fillText(ch.name.toUpperCase(), cx, cardCY + 58);
-      ctx.fillStyle = '#ccc';
-      ctx.font = '11px sans-serif';
-      ctx.fillText(ch.archetype, cx, cardCY + 76);
-      // Description wraps to 2 lines on narrow cards
-      ctx.font = cardW < 170 ? '9px sans-serif' : '10px sans-serif';
-      ctx.fillStyle = '#888';
-      if (cardW < 170) {
-        // split description roughly in half at a word boundary
-        const words = ch.description.split(' ');
-        const mid = Math.ceil(words.length / 2);
-        ctx.fillText(words.slice(0, mid).join(' '), cx, cardCY + 92);
-        ctx.fillText(words.slice(mid).join(' '), cx, cardCY + 104);
-      } else {
-        ctx.fillText(ch.description, cx, cardCY + 96);
+      ctx.lineWidth = selected ? 3 : 2;
+      ctx.strokeRect(cardX, cardY, cardW, cardH);
+      if (selected) {
+        const glow = 0.35 + Math.sin(animT * 3 + c) * 0.18;
+        ctx.strokeStyle = `rgba(255, 255, 255, ${glow})`;
+        ctx.lineWidth = 1.5;
+        ctx.strokeRect(cardX - 2, cardY - 2, cardW + 4, cardH + 4);
       }
+
+      // Character preview — same shapes as before, just centered with idle bob
+      const figW = cardW < 170 ? 36 : 48;
+      const figH = cardW < 170 ? 64 : 86;
+      const headW = cardW < 170 ? 20 : 28;
+      const headH = cardW < 170 ? 14 : 20;
+      const bob = Math.sin(animT * 1.4 + c * 0.7) * 1.5;
+      const figY = cardY + 28 + bob;
+      ctx.fillStyle = ch.color;
+      ctx.fillRect(cx - figW/2, figY, figW, figH);
+      ctx.fillStyle = ch.color2;
+      ctx.fillRect(cx - figW/2, figY + figH * 0.4, figW, 8);
+      ctx.fillStyle = '#ffddba';
+      ctx.fillRect(cx - headW/2, figY - 14, headW, headH);
+      ctx.fillStyle = '#222';
+      ctx.fillRect(cx + 2, figY - 8, 3, 3);
+      ctx.fillRect(cx - 5, figY - 8, 3, 3);
+
+      // Name
+      ctx.fillStyle = '#ffffff';
+      ctx.font = cardW < 170 ? 'bold 14px sans-serif' : 'bold 18px sans-serif';
+      ctx.fillText(ch.name.toUpperCase(), cx, cardY + cardH * 0.62);
+
+      // Archetype badge — small color-tinted pill
+      const archW = Math.min(cardW - 12, ch.archetype.length * 6 + 16);
+      ctx.fillStyle = ch.color;
+      ctx.globalAlpha = 0.25;
+      ctx.fillRect(cx - archW/2, cardY + cardH * 0.66, archW, 12);
+      ctx.globalAlpha = 1;
+      ctx.strokeStyle = ch.color;
+      ctx.lineWidth = 1;
+      ctx.strokeRect(cx - archW/2, cardY + cardH * 0.66, archW, 12);
+      ctx.fillStyle = ch.color2;
+      ctx.font = 'bold 9px sans-serif';
+      ctx.fillText(ch.archetype.toUpperCase(), cx, cardY + cardH * 0.66 + 9);
+
+      // Stat bars — speed / jump / weight, scaled relative to the roster
+      const barW = cardW - 14;
+      const barX = cardX + 7;
+      const barLabels = ['SPD', 'JMP', 'WGT'];
+      const barVals = [
+        ch.walkSpeed / maxWalk,
+        ch.jumpPower / maxJump,
+        ch.weight / maxWeight,
+      ];
+      const barColors = ['#4ab8ff', '#ffeb3b', '#a34040'];
+      for (let s = 0; s < 3; s++) {
+        const by = cardY + cardH - 30 + s * 8;
+        ctx.fillStyle = '#0c0c14';
+        ctx.fillRect(barX + 22, by, barW - 22, 4);
+        ctx.fillStyle = barColors[s];
+        ctx.fillRect(barX + 22, by, (barW - 22) * barVals[s], 4);
+        ctx.fillStyle = '#888';
+        ctx.font = '7px monospace';
+        ctx.textAlign = 'left';
+        ctx.fillText(barLabels[s], barX, by + 4);
+      }
+      ctx.textAlign = 'center';
     }
 
     // Cursors — only the local-controlling players in net mode get a cursor.
-    const showCursorFor = (net.mode === 'local') ? [true, true]
-                       : (net.mode === 'host')   ? [true, false]
-                                                 : [false, true];
     for (let i = 0; i < 2; i++) {
       if (!showCursorFor[i]) continue;
       const cx = cardPositions[menuSel[i]];
@@ -4833,12 +5263,13 @@
     const hints = [
       'Nico    (Rushdown):    neutral→Fireball     side→Burn Dash    up→Fire Propel  down→Counter',
       'Derek   (Zoner):       neutral→Shuriken     side→Crossbow     up→Katana Dash  down→Smoke Bomb',
-      'Rhys    (Trapper):     neutral→Tox Headbutt side→Tox Punch    up→Poison Lob   down→Spore Trap  · specials poison 1.5s',
+      'Rhys    (Trapper):     neutral→Tox Punch    side→Tox Headbutt up→Poison Lob   down→Spore Trap  · specials poison 1.5s',
       'Greyson (Hybrid):      neutral→Grenade      side→Hard Punch   up→Mega Jump    down→Cmd Grab  · grab pierces shield',
       'Kele    (Heavyweight): neutral→Power Punch  side→Suplex       up→Uppercut     down→Body Slam · slow, huge damage',
       'Jonah   (Flier):       neutral→Beet Blast   side→Mach 5       up→Glide        down→Ultra Spike · 5 jumps, floaty',
-      'Theo    (Controller):  neutral→Charge Bomb  side→Power Blast  up→Teleport     down→Absorb · absorb heals from projectiles',
+      'Theo    (Controller):  neutral→Charge Orb   side→Power Blast  up→Teleport     down→Absorb · charge orb is a flying projectile',
       'Cole    (Pyromaniac):  neutral→Igniter Toss side→Gasoline     up→Rocket Boost down→Molotov   · fuel meter; gas + igniter combo',
+      'Angus   (Hacker):      neutral→Code Disrupt side→HTML Dash    up→Grapple Hook down→Code Farm · code meter charges from damage',
     ];
     for (let hi = 0; hi < hints.length; hi++) {
       ctx.fillText(hints[hi], 30, H - 205 + hi * 15);

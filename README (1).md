@@ -7,7 +7,7 @@ Drop `index.html` into any browser or static host and play.
 ## Status
 
 Playable prototype. Local 2-player (shared keyboard) **and** online 2-player over WebRTC,
-with eight characters, full move sets, camera tracking, ledge recoveries, and stock-based
+with nine characters, full move sets, camera tracking, ledge recoveries, and stock-based
 matches.
 
 ## Online play
@@ -62,12 +62,12 @@ down air — down air is a spike).
 
 ## Roster
 
-Eight characters with distinct archetypes. All have four directional specials, ground tilts
+Nine characters with distinct archetypes. All have four directional specials, ground tilts
 (jab/forward/up/down) and full aerials. Stats below are relative.
 
 ### Nico — Rushdown (orange/yellow)
 Fast close-range pressure with fire.
-- **Neutral**: Fireball (arcing projectile)
+- **Neutral**: Fireball (arcing projectile that **bounces up to 3 times** off the floor before despawning)
 - **Side**: Burning Dash (invuln startup, 11 dmg, KO move)
 - **Up**: Fire Propulsion (recovery + hitbox)
 - **Down**: Counter (reflects next attack at 1.5×)
@@ -81,8 +81,8 @@ Keep-away ninja with ranged tools.
 
 ### Rhys — Trapper (green)
 Low base damage, but specials inflict 1.5s poison DoT (1.5%/15 frames).
-- **Neutral**: Toxic Headbutt (Green-Missile-style horizontal launch)
-- **Side**: Toxic Punch (heaviest punch, KB scales with current speed)
+- **Neutral**: Toxic Punch (heaviest punch, KB scales with current speed)
+- **Side**: Toxic Headbutt (Green-Missile-style horizontal launch)
 - **Up**: Poison Lob (bomb arcs up, lands as a poison cloud)
 - **Down**: Spore Trap (stationary armed trap, lasts 6s)
 
@@ -111,7 +111,7 @@ Lightest weight, 5 air jumps, floaty gravity.
 
 ### Theo — Controller (purple/cyan)
 Medium stats, battlefield-control specialist with dark-energy tools.
-- **Neutral**: Charge Bomb (hold special to charge, release to detonate AoE — 7→25 dmg, 55→120 radius)
+- **Neutral**: Charge Orb (hold special to charge — release to **fire a flying orb projectile** that detonates on impact for 7→25 dmg, 55→120 radius based on charge held)
 - **Side**: Power Blast (energy rifle shot — laser projectile + close-range bayonet thrust; both connect at point-blank)
 - **Up**: Teleport (vanishes briefly, reappears 200px in the directional key pressed; helpless after if airborne)
 - **Down**: Absorb (consumes incoming projectiles within 80px and converts their damage into healing at 1.2×)
@@ -124,6 +124,14 @@ that gates his rocket boost and gasoline spray. Gas + ignite is the combo identi
 - **Up**: Rocket Boost (hold special to thrust upward, drains 0.34 fuel/frame ≈ 5s at full tank; steerable left/right, 14f endlag on landing, helpless if airborne when fuel runs dry)
 - **Down**: Molotov (lobbed bottle, 8 dmg direct; on impact spawns a 100-frame fire patch that ticks 1.4 dmg every 12f. Direct hits also apply *fueled*.)
 - **Fueled** status (4s) is shared across the kit — anything that ignites it (Ignite hitbox or Fire Patch tick) deals bonus damage and clears the status.
+
+### Angus — Hacker (dark green / matrix green)
+Computer nerd. Has a **code meter** (0–100) that **charges by taking damage** (2 code per
+damage point). Drives platforms and dashes; reset on death.
+- **Neutral**: Code Disrupter (costs 25 code; spawns a 110×8 px temporary platform in front of Angus that lasts ~5 seconds — anyone can stand on it)
+- **Side**: HTML Dash (costs 20 code; fast 12-speed dash that **re-reads directional inputs every frame** and curves to match — change direction mid-dash by holding new keys, brief invuln)
+- **Up**: Grappling Hook (lobbed hook — direct hit on a fighter **yanks them toward Angus**; miss/expiry pulls **Angus toward the hook tip** as a recovery boost)
+- **Down**: Code Farm (channels for 3 seconds and fills the code meter to max — vulnerable, no super armor)
 
 ## Core mechanics
 
