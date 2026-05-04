@@ -3899,6 +3899,7 @@
       h ^= n;
       h = Math.imul(h, 0x01000193);
     }
+    function mixStr(s) { for (let i = 0; i < (s||'').length; i++) mix(s.charCodeAt(i)); }
     for (const f of fighters) {
       mix(Math.round(f.x * 100));
       mix(Math.round(f.y * 100));
@@ -3906,21 +3907,52 @@
       mix(Math.round(f.vy * 100));
       mix(Math.round(f.damage * 100));
       mix(f.stocks);
+      mix(f.facing);
+      mix(f.jumps);
       mix(Math.round(f.fuel * 10));
       mix(f.fueled);
       mix(f.poisonTimer);
+      mix(Math.round(f.code * 10));   // Angus's meter — was missing
       mix(f.hitstun);
       mix(f.invuln);
       mix(f.helpless ? 1 : 0);
       mix(f.endlag);
+      mix(f.attackCooldown);
+      mix(f.counterActive);
+      mix(f.counterCooldown);
+      mix(f.onGround ? 1 : 0);
+      mix(f.respawnTimer);
+      mix(f.ledgeGrabTimer);
+      mix(f.ledgeGrab ? (f.ledgeGrab.side | 0) : 0);
       mix(f.moveState ? f.moveState.timer : -1);
+      mixStr(f.moveState ? f.moveState.type : '');
+      // Sub-state that affects move outcomes
+      if (f.moveState) {
+        if (f.moveState.charge != null) mix(f.moveState.charge | 0);
+        if (f.moveState.phase != null) mixStr(f.moveState.phase);
+        if (f.moveState.released != null) mix(f.moveState.released ? 1 : 0);
+      }
     }
     mix(projectiles.length);
     for (const p of projectiles) {
+      mixStr(p.type);
       mix(Math.round(p.x * 100));
       mix(Math.round(p.y * 100));
+      mix(Math.round(p.vx * 100));
+      mix(Math.round(p.vy * 100));
       mix(p.life);
+      if (p.fuse != null) mix(p.fuse);
+      if (p.bounces != null) mix(p.bounces);
+      if (p.charge != null) mix(p.charge | 0);
+      if (p.armed != null) mix(p.armed ? 1 : 0);
+      if (p.triggered != null) mix(p.triggered ? 1 : 0);
+      if (p.ignited != null) mix(p.ignited ? 1 : 0);
+      if (p.consumed != null) mix(p.consumed ? 1 : 0);
     }
+    // Frame-counter spawn queue — windups in flight DEFINITELY affect future
+    // gameplay state, so include them in the hash.
+    mix(pendingSpawns.length);
+    for (const s of pendingSpawns) mix(s.framesLeft);
     return h >>> 0;
   }
 
@@ -3943,11 +3975,12 @@
   function snapshotInputsLocal() {
     // Local 2P: copy all keys that appear in either control map. Reads from the
     // press latch too so quick taps (keydown+keyup between two sim frames) still
-    // fire the move.
+    // fire the move. Latch is consumed here so it isn't double-counted next frame.
     for (let i = 0; i < 2; i++) {
       const c = controls[i];
       for (const b of INPUT_BTNS) frameKeys[c[b]] = isHeld(c[b]);
     }
+    consumeKeyLatch();
   }
   // Capture the local player's inputs as a 7-bit mask for sending over the wire.
   // In online mode the local keyboard always uses the P1 scheme (WASD / LShift / F / R)
@@ -3959,6 +3992,11 @@
     for (let i = 0; i < INPUT_BTNS.length; i++) {
       if (isHeld(c[INPUT_BTNS[i]])) mask |= (1 << i);
     }
+    // Consume the latch HERE — once we've captured it into a slot's mask. If we
+    // consumed at end-of-stepSim instead, a stall-then-burst-step sequence would
+    // clear the latch on the first stepSim before the second stepSim's capture
+    // could read it, dropping the press silently.
+    consumeKeyLatch();
     return mask;
   }
   // Apply a 7-bit input mask to frameKeys for the given player's keycodes.
@@ -5351,8 +5389,13 @@
           }
         } else if (tap(ctrl.block)) {
           menuConfirm[i] = false;
-          if (net.mode !== 'local') {
-            // Cancel networking on un-ready
+          // In net mode, only tear down the connection if we never actually
+          // connected (still in pre-handshake). Once a peer is established
+          // — including in the post-match LOBBY — un-confirming should JUST
+          // un-mark the character pick. Tearing down here would invalidate
+          // the host's room code and drop the guest mid-lobby. Press ESC to
+          // explicitly leave the lobby.
+          if (net.mode !== 'local' && !net.everConnected) {
             netCleanup();
             net.statusText = '';
           }
@@ -5892,8 +5935,10 @@
       winner = alive[0];
       state = STATE.OVER;
     }
-    // Latch consumed — sim frame advanced, any tap-from-this-rAF is now used up.
-    consumeKeyLatch();
+    // (consumeKeyLatch is called by captureLocalInputBits / snapshotInputsLocal
+    //  when an input is actually read into a slot, NOT here. If it fired here,
+    //  a stall-then-burst-step sequence in one rAF would clear the latch on
+    //  the first stepSim before later steps' captures could read it.)
     return true;
   }
 
