@@ -1308,13 +1308,13 @@
     // --- COLTON SPECIALS (Billiards, pool stick) ---
     coltonSpecial(dir) {
       if (dir === 'neutral') {
-        // Pool Ball Throw — 60-frame windup (1 second), then a heavy ball
+        // Pool Ball Throw — 30-frame windup (0.5 sec), then a heavy ball
         // with the highest single-projectile damage in the game.
-        this.moveState = { type: 'poolBallWindup', timer: 78 };
+        this.moveState = { type: 'poolBallWindup', timer: 48 };
         const fwd = this.facing;
         // Lock Colton's horizontal motion during windup.
         this.vx = 0;
-        delaySpawn(60, () => {
+        delaySpawn(30, () => {
           if (this.respawnTimer > 0) return;
           projectiles.push({
             owner: this, x: this.cx + fwd * 24, y: this.cy - 8,
