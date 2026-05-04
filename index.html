@@ -554,6 +554,112 @@
         this.moveState = { type: 'atk_dair', timer: 22, active: [6, 14],
           dmg: 9, kbx: this.facing * 1.5, kby: 6, reach: 22, vertical: 1, spike: true, flavor };
       }
+      // Apply per-character flavor — character-specific tweaks to certain attacks.
+      this.applyAttackFlavor();
+    }
+
+    // Per-character overrides on basic attacks. Mutates this.moveState in place
+    // and may also queue projectile spawns for projectile-style basic attacks.
+    // Each entry leans into the character's identity (zoner / spike / heavy / etc).
+    applyAttackFlavor() {
+      if (!this.moveState) return;
+      const k = this.key, t = this.moveState.type, m = this.moveState;
+
+      // Nico — fire-flavor jab + crushing fire spike on dair
+      if (k === 'nico') {
+        if (t === 'atk_jab') { m.dmg += 1.5; }
+        if (t === 'atk_dair') { m.dmg = 12; m.kby = 9; }
+      }
+
+      // Derek — projectile fair (mini shuriken) + extended-active nair
+      if (k === 'derek') {
+        if (t === 'atk_fair') {
+          m.dmg = 4;
+          const fwd = this.facing;
+          delaySpawn(4, () => {
+            projectiles.push({
+              owner: this, x: this.cx + fwd * 24, y: this.cy + 6,
+              vx: fwd * 9, vy: 0, w: 10, h: 10,
+              life: 28, damage: 4, kbx: fwd * 2.5, kby: -1.5,
+              type: 'shuriken', gravity: 0, spin: 0,
+            });
+          });
+        }
+        if (t === 'atk_nair') {
+          m.timer = 28; m.initTimer = 28; m.active = [3, 22]; m.reach = 30;
+        }
+      }
+
+      // Rhys — dair is a poison-tipped spike (still nerfed by 0.55 base)
+      if (k === 'rhys') {
+        if (t === 'atk_dair') { m.kby = 10; m.poison = true; }
+      }
+
+      // Greyson — wide low-sweep dtilt (stuns prone)
+      if (k === 'greyson') {
+        if (t === 'atk_dtilt') {
+          m.dmg = 7; m.reach = 50; m.timer = 22; m.initTimer = 22; m.active = [6, 14];
+          m.kbx = this.facing * 4.5;
+        }
+      }
+
+      // Kele — heavy ftilt and bair (slow, big knockback)
+      if (k === 'kele') {
+        if (t === 'atk_ftilt') {
+          m.dmg = 11; m.kbx = this.facing * 7; m.kby = -4;
+          m.timer = 24; m.initTimer = 24; m.active = [9, 14];
+        }
+        if (t === 'atk_bair') {
+          m.dmg = 12; m.kbx = -this.facing * 7;
+        }
+      }
+
+      // Jonah — multi-hit nair + huge launch on uair
+      if (k === 'jonah') {
+        if (t === 'atk_nair') {
+          m.dmg = 3; m.timer = 28; m.initTimer = 28; m.active = [3, 24];
+        }
+        if (t === 'atk_uair') {
+          m.dmg = 9; m.kby = -10;
+        }
+      }
+
+      // Theo — utilt sends opponents straight up (great juggle starter)
+      if (k === 'theo') {
+        if (t === 'atk_utilt') {
+          m.dmg = 8; m.kby = -10; m.kbx = this.facing * 0.5;
+        }
+      }
+
+      // Cole — bair smears them with gasoline (fueled status on hit)
+      if (k === 'cole') {
+        if (t === 'atk_bair') { m.fueled = true; }
+      }
+
+      // Angus — dtilt fires a small "code bug" projectile that scuttles forward
+      if (k === 'angus') {
+        if (t === 'atk_dtilt') {
+          m.dmg = 3;
+          const fwd = this.facing;
+          delaySpawn(4, () => {
+            projectiles.push({
+              owner: this, x: this.cx + fwd * 16, y: this.y + this.h - 14,
+              vx: fwd * 7, vy: 0, w: 10, h: 8,
+              life: 32, damage: 5, kbx: fwd * 3, kby: -2,
+              type: 'codeBug', gravity: 0.25, spin: 0,
+            });
+          });
+        }
+      }
+
+      // Aidan — fast jab with mildly randomized KB (rng() so it stays
+      // deterministic for online matches). Adds a chaotic feel.
+      if (k === 'aidan') {
+        if (t === 'atk_jab') {
+          m.dmg = 3; m.timer = 9; m.initTimer = 9; m.active = [2, 6];
+          m.kbx = this.facing * (2 + (rng() - 0.5) * 2);
+        }
+      }
     }
 
     // --- NICO SPECIALS ---
@@ -1810,8 +1916,10 @@
       // Regular attacks: check active frame window
       if (t.startsWith('atk_')) {
         const m = this.moveState;
-        // Compute elapsed frames since start (timer counts down from initial value)
-        const elapsed = this.attackInitialTimer(t) - m.timer;
+        // Compute elapsed frames since start (timer counts down from initial value).
+        // Use m.initTimer if present (set by applyAttackFlavor when overriding the
+        // baseline duration), otherwise fall back to the map's default value.
+        const elapsed = (m.initTimer != null ? m.initTimer : this.attackInitialTimer(t)) - m.timer;
         if (elapsed < m.active[0] || elapsed > m.active[1]) return null;
         const reach = m.reach;
         let hx, hy, hw, hh;
@@ -1836,7 +1944,8 @@
         let dmg = m.dmg;
         if (this.key === 'rhys') dmg = Math.max(1, dmg * 0.55);
         return { x: hx, y: hy, w: hw, h: hh,
-                 damage: dmg, kbx: m.kbx, kby: m.kby, type: m.flavor };
+                 damage: dmg, kbx: m.kbx, kby: m.kby, type: m.flavor,
+                 poison: m.poison, fueled: m.fueled };
       }
       return null;
     }
@@ -4625,6 +4734,10 @@
             def.applyPoison(90);
             spawnEffect(def.cx, def.cy, '#5aaf3a', 20, 28);
           }
+          if (hb.fueled) {
+            def.applyFuel(240);
+            spawnEffect(def.cx, def.cy, '#5a4028', 22, 30);
+          }
           // Uppercut: send victim into free-fall after knockback
           if (hb.uppercut) {
             def.helpless = true;
@@ -4908,6 +5021,18 @@
         if (Math.random() < 0.4) {
           spawnEffect(cx + (Math.random()-0.5)*16, cy + (Math.random()-0.5)*16, '#ffe14a', 14, 8);
         }
+      } else if (p.type === 'codeBug') {
+        // Tiny scuttling code-bug — green shell + black symbol
+        const cx = p.x + p.w/2, cy = p.y + p.h/2;
+        ctx.fillStyle = '#0d4f1c';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#39ff14';
+        ctx.fillRect(p.x + 1, p.y + 1, p.w - 2, p.h - 2);
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 7px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('}', cx, cy + 3);
+        ctx.textAlign = 'left';
       } else if (p.type === 'cheese') {
         // Yellow wedge with darker triangular holes
         const cx = p.x + p.w/2, cy = p.y + p.h/2;
@@ -5605,14 +5730,28 @@
     const startX = (W - totalW) / 2 + cardW / 2;
     const cardCY = 290;
     const cardPositions = [];
-    // Pre-compute global max stats for relative bar scaling.
-    let maxWalk = 0, maxJump = 0, maxWeight = 0;
+    // Pre-compute roster min/max so the stat bars can use (val-min)/(max-min)
+    // scaling — this gives MUCH more emphasized variation than the previous
+    // val/max scheme (where the weakest fighter still showed a 60%+ bar).
+    let maxWalk = -Infinity, maxJump = -Infinity, maxWeight = -Infinity;
+    let minWalk =  Infinity, minJump =  Infinity, minWeight =  Infinity;
     for (const k of CHAR_KEYS) {
       const c = CHARS[k];
-      if (c.walkSpeed > maxWalk) maxWalk = c.walkSpeed;
-      if (c.jumpPower > maxJump) maxJump = c.jumpPower;
-      if (c.weight > maxWeight) maxWeight = c.weight;
+      if (c.walkSpeed  > maxWalk)   maxWalk   = c.walkSpeed;
+      if (c.walkSpeed  < minWalk)   minWalk   = c.walkSpeed;
+      if (c.jumpPower  > maxJump)   maxJump   = c.jumpPower;
+      if (c.jumpPower  < minJump)   minJump   = c.jumpPower;
+      if (c.weight     > maxWeight) maxWeight = c.weight;
+      if (c.weight     < minWeight) minWeight = c.weight;
     }
+    // Tier color: dramatic visual difference between top, mid, low.
+    const tierColor = (frac) => {
+      if (frac >= 0.85) return '#39ff14';  // S — bright green
+      if (frac >= 0.6)  return '#a0e0d0';  // A — teal
+      if (frac >= 0.35) return '#ffe14a';  // B — gold
+      if (frac >= 0.15) return '#ff8a3a';  // C — orange
+      return '#a34040';                      // D — red
+    };
     const animT = Date.now() * 0.003;
     // Whose cursor is visible (computed up here so the card-draw loop can
     // tint selected cards). Local: both players; net: only the local-side player.
@@ -5694,24 +5833,42 @@
       ctx.font = 'bold 9px sans-serif';
       ctx.fillText(ch.archetype.toUpperCase(), cx, cardY + cardH * 0.66 + 9);
 
-      // Stat bars — speed / jump / weight, scaled relative to the roster
+      // Stat bars — speed / jump / weight, normalized to (val-min)/(max-min)
+      // and color-graded (S/A/B/C/D) so the visual variation between the
+      // strongest and weakest fighter is dramatic. Empty bar = roster floor,
+      // full bar = roster ceiling.
       const barW = cardW - 14;
       const barX = cardX + 7;
-      const barLabels = ['SPD', 'JMP', 'WGT'];
-      const barVals = [
-        ch.walkSpeed / maxWalk,
-        ch.jumpPower / maxJump,
-        ch.weight / maxWeight,
+      const denom = (max, min) => (max - min) || 1;
+      const fracs = [
+        (ch.walkSpeed - minWalk)   / denom(maxWalk, minWalk),
+        (ch.jumpPower - minJump)   / denom(maxJump, minJump),
+        (ch.weight    - minWeight) / denom(maxWeight, minWeight),
       ];
-      const barColors = ['#4ab8ff', '#ffeb3b', '#a34040'];
+      const barLabels = ['SPD', 'JMP', 'WGT'];
       for (let s = 0; s < 3; s++) {
         const by = cardY + cardH - 30 + s * 8;
+        const frac = Math.max(0, Math.min(1, fracs[s]));
+        const innerW = barW - 22;
+        // Track
         ctx.fillStyle = '#0c0c14';
-        ctx.fillRect(barX + 22, by, barW - 22, 4);
-        ctx.fillStyle = barColors[s];
-        ctx.fillRect(barX + 22, by, (barW - 22) * barVals[s], 4);
-        ctx.fillStyle = '#888';
-        ctx.font = '7px monospace';
+        ctx.fillRect(barX + 22, by, innerW, 4);
+        // Tick marks at quarters for visual scale
+        ctx.fillStyle = 'rgba(255,255,255,0.08)';
+        for (let q = 1; q <= 3; q++) ctx.fillRect(barX + 22 + (innerW * q / 4) - 0.5, by, 1, 4);
+        // Filled portion in tier color
+        if (frac > 0) {
+          ctx.fillStyle = tierColor(frac);
+          ctx.fillRect(barX + 22, by, innerW * frac, 4);
+          // Bright tip for high-tier bars (visual emphasis)
+          if (frac > 0.7) {
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(barX + 22 + innerW * frac - 2, by, 2, 4);
+          }
+        }
+        // Label in matching tier color (faded for low tiers)
+        ctx.fillStyle = frac >= 0.6 ? '#fff' : (frac >= 0.35 ? '#bbb' : '#666');
+        ctx.font = 'bold 7px monospace';
         ctx.textAlign = 'left';
         ctx.fillText(barLabels[s], barX, by + 4);
       }
