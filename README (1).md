@@ -7,7 +7,7 @@ Drop `index.html` into any browser or static host and play.
 ## Status
 
 Playable prototype. Local 2-player (shared keyboard) **and** online 2-player over WebRTC,
-with nine characters, full move sets, camera tracking, ledge recoveries, and stock-based
+with ten characters, full move sets, camera tracking, ledge recoveries, and stock-based
 matches.
 
 ## Online play
@@ -62,7 +62,7 @@ down air — down air is a spike).
 
 ## Roster
 
-Nine characters with distinct archetypes. All have four directional specials, ground tilts
+Ten characters with distinct archetypes. All have four directional specials, ground tilts
 (jab/forward/up/down) and full aerials. Stats below are relative.
 
 ### Nico — Rushdown (orange/yellow)
@@ -132,6 +132,13 @@ damage point). Drives platforms and dashes; reset on death.
 - **Side**: HTML Dash (costs 20 code; fast 12-speed dash that **re-reads directional inputs every frame** and curves to match — change direction mid-dash by holding new keys, brief invuln)
 - **Up**: Grappling Hook (lobbed hook — direct hit on a fighter **yanks them toward Angus**; miss/expiry pulls **Angus toward the hook tip** as a recovery boost)
 - **Down**: Code Farm (channels for 3 seconds and fills the code meter to max — vulnerable, no super armor)
+
+### Aidan — Jester (purple/gold)
+Jokester with a chaos kit — random effects, hammers, and lobbed cheese.
+- **Neutral**: Loot Box (lobbed crate; on direct hit applies one of: Poisoned 3s · Doused (fueled) 4s · Slowed 40f hitstun · Bonus 10 dmg · Aidan heals 12%)
+- **Side**: Hammer Bonk (heavy overhead swing, 14 dmg + strong KB)
+- **Up**: Cannon Launch (fast upward burst, vy = -17, brief invuln, helpless after if airborne)
+- **Down**: Cheese Throw (lobbed yellow wedge that arcs and falls, 9 dmg on contact)
 
 ## Core mechanics
 

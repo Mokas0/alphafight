@@ -229,9 +229,20 @@
       jumpPower: 12.0,
       weight: 0.95,
       description: 'Computer nerd. Code meter charges from damage taken; fuels traps and dashes.',
+    },
+    aidan: {
+      name: 'Aidan',
+      color: '#a04ade',
+      color2: '#ffe14a',
+      archetype: 'Jester',
+      walkSpeed: 3.4,
+      dashSpeed: 5.4,
+      jumpPower: 12.5,
+      weight: 0.95,
+      description: 'Jokester jester. Random loot effects, hammer bonks, lobbed cheese.',
     }
   };
-  const CHAR_KEYS = ['nico', 'derek', 'rhys', 'greyson', 'kele', 'jonah', 'theo', 'cole', 'angus'];
+  const CHAR_KEYS = ['nico', 'derek', 'rhys', 'greyson', 'kele', 'jonah', 'theo', 'cole', 'angus', 'aidan'];
 
   // ---------- CONTROL MAPS ----------
   const controls = [
@@ -494,7 +505,8 @@
       else if (this.key === 'jonah') this.jonahSpecial(dir);
       else if (this.key === 'theo') this.theoSpecial(dir);
       else if (this.key === 'cole') this.coleSpecial(dir);
-      else this.angusSpecial(dir);
+      else if (this.key === 'angus') this.angusSpecial(dir);
+      else this.aidanSpecial(dir);
     }
 
     startAttack(dir) {
@@ -962,13 +974,16 @@
         // Grappling Hook — fires a hook upward+forward; on contact with an
         // enemy, pulls them toward Angus. On contact with anything else (or
         // expiry), pulls Angus toward the hook point (recovery).
-        this.moveState = { type: 'grappleHook', timer: 30 };
+        this.moveState = { type: 'grappleHook', timer: 18 };
+        // Strong initial upward kick so Angus rises a bit while the hook is
+        // in flight — important for deep below-stage recoveries.
+        this.vy = Math.min(this.vy, -8);
         const fwd = this.facing;
-        delaySpawn(4, () => {
+        delaySpawn(3, () => {
           projectiles.push({
             owner: this, x: this.cx + fwd * 8, y: this.cy - 8,
-            vx: fwd * 9, vy: -11, w: 10, h: 10,
-            life: 30, damage: 4, kbx: 0, kby: -3,
+            vx: fwd * 10, vy: -12, w: 10, h: 10,
+            life: 14, damage: 4, kbx: 0, kby: -3,
             type: 'grapple', gravity: 0,
           });
         });
@@ -990,6 +1005,53 @@
         // Code Farm — channel for 3 seconds; fills code meter to max over the
         // duration. Vulnerable; no super armor.
         this.moveState = { type: 'codeFarm', timer: 180, startCode: this.code };
+      }
+    }
+
+    // --- AIDAN SPECIALS ---
+    // Jester. All four specials lean into chaos: random-effect loot box, big
+    // overhead hammer, fast cannon recovery, and lobbed cheese.
+    aidanSpecial(dir) {
+      if (dir === 'neutral') {
+        // Loot Box — lobbed crate that applies a random effect on direct hit.
+        this.moveState = { type: 'lootBox', timer: 22 };
+        const fwd = this.facing;
+        delaySpawn(7, () => {
+          projectiles.push({
+            owner: this, x: this.cx + fwd * 16, y: this.cy - 6,
+            vx: fwd * 7, vy: -8, w: 16, h: 14,
+            life: 110, damage: 6, kbx: fwd * 4, kby: -3,
+            type: 'lootBox', gravity: 0.4, spin: 0,
+          });
+        });
+      } else if (dir === 'side') {
+        // Hammer Bonk — heavy overhead swing, slow startup, big payoff.
+        this.moveState = {
+          type: 'hammerBonk', timer: 32, active: [10, 18],
+          hasHit: null,
+        };
+        this.vx += this.facing * 1.5;
+      } else if (dir === 'up') {
+        // Cannon Launch — speedy upward burst (recovery). Helpless after if airborne.
+        this.moveState = { type: 'cannonLaunch', timer: 22 };
+        this.vy = -17;
+        this.vx = this.facing * 1.5;
+        this.jumps = Math.max(this.jumps, 1);
+        this.invuln = 8;
+        spawnEffect(this.cx, this.y + this.h, '#ffe14a', 26, 30);
+        spawnEffect(this.cx, this.y + this.h + 6, '#a04ade', 22, 26);
+      } else if (dir === 'down') {
+        // Cheese Throw — lobbed yellow block that arcs up and falls.
+        this.moveState = { type: 'cheeseThrow', timer: 22 };
+        const fwd = this.facing;
+        delaySpawn(7, () => {
+          projectiles.push({
+            owner: this, x: this.cx + fwd * 12, y: this.cy - 14,
+            vx: fwd * 5, vy: -12, w: 18, h: 14,
+            life: 110, damage: 9, kbx: fwd * 4, kby: -4,
+            type: 'cheese', gravity: 0.5, spin: 0,
+          });
+        });
       }
     }
 
@@ -1020,6 +1082,7 @@
             'rocketBoost', // Cole up-special
             'htmlDash',    // Angus side-special
             'grappleHook', // Angus up-special (recovery)
+            'cannonLaunch', // Aidan up-special (recovery)
           ]);
           if (propelMoves.has(this.moveState.type) && !this.onGround) {
             this.helpless = true;
@@ -1043,6 +1106,7 @@
             rocketBoost: 14,
             htmlDash: 16,
             grappleHook: 10,
+            cannonLaunch: 10,
           };
           const lag = endlagMap[this.moveState.type];
           if (lag) {
@@ -1280,6 +1344,16 @@
             // Released or out of fuel — end the move so helpless/endlag kicks in.
             m.timer = Math.min(m.timer, 8);
             this.rocketHeld = false;
+          }
+        }
+        // Angus: Grapple Hook windup — slow Angus's FALL while the hook is in
+        // flight so he survives long enough for the recovery boost to fire.
+        // Don't cap upward velocity — that would neuter the recovery yank,
+        // which sets vy to -15..-17 from updateProjectiles after this block.
+        if (this.moveState && this.moveState.type === 'grappleHook') {
+          if (this.vy > 3) this.vy = 3;
+          if (Math.random() < 0.35) {
+            spawnEffect(this.cx + (Math.random()-0.5)*14, this.cy + 18, '#39ff14', 12, 8);
           }
         }
         // Angus: HTML Dash — re-read directional inputs each frame to redirect
@@ -1715,6 +1789,15 @@
                  y: this.y + 16, w: 40, h: 22,
                  damage: 9, kbx: this.facing * 5, kby: -3, type: 'energy' };
       }
+      // Aidan: Hammer Bonk — wide overhead swing. Wider arc than Hard Punch.
+      if (t === 'hammerBonk') {
+        const elapsed = 32 - this.moveState.timer;
+        const [a, b] = this.moveState.active;
+        if (elapsed < a || elapsed > b) return null;
+        return { x: this.facing === 1 ? this.x + this.w - 6 : this.x - 56,
+                 y: this.y - 4, w: 62, h: this.h * 0.85,
+                 damage: 14, kbx: this.facing * 7, kby: -6, type: 'heavy' };
+      }
       // Jonah: Ultra Spike — body is a hitbox while plummeting (before bounce)
       if (t === 'ultraSpike' && !this.moveState.bounced) {
         return { x: this.x - 2, y: this.y + 6, w: this.w + 4, h: this.h - 4,
@@ -1777,6 +1860,7 @@
         theo:    'rgba(138, 74, 222, ',
         cole:    'rgba(255, 138, 58, ',
         angus:   'rgba(57, 255, 20, ',
+        aidan:   'rgba(160, 74, 222, ',
       };
       if (this.afterimages.length > 0) {
         const tint = aiTints[this.key];
@@ -2072,6 +2156,56 @@
         // Beard outline below the head — dark patch around the chin
         ctx.fillStyle = '#3a1a1a';
         ctx.fillRect(bodyX + bodyW * 0.18, bodyY + bodyH * 0.21, bodyW * 0.64, 3);
+      }
+      // Aidan — three-pointed jester hat with gold bells + harlequin diamond pattern + grin
+      if (this.key === 'aidan') {
+        const t = this.animTick * 0.12;
+        const hatBaseY = bodyY - 2;
+        const hx = bodyX + bodyW * 0.5;
+        // Three points of the hat (left, center, right) with little bells
+        const points = [
+          { dx: -bodyW * 0.36, lift: Math.sin(t) * 1.5 },
+          { dx: 0,             lift: Math.sin(t + 1.5) * 1.5 },
+          { dx: bodyW * 0.36,  lift: Math.sin(t + 3.0) * 1.5 },
+        ];
+        for (const pt of points) {
+          ctx.fillStyle = '#a04ade';
+          ctx.beginPath();
+          ctx.moveTo(hx + pt.dx - 5, hatBaseY);
+          ctx.lineTo(hx + pt.dx + 5, hatBaseY);
+          ctx.lineTo(hx + pt.dx, hatBaseY - 14 + pt.lift);
+          ctx.closePath();
+          ctx.fill();
+          // Gold bell at the tip
+          ctx.fillStyle = '#ffe14a';
+          ctx.beginPath();
+          ctx.arc(hx + pt.dx, hatBaseY - 14 + pt.lift, 2.5, 0, Math.PI*2);
+          ctx.fill();
+        }
+        // Hat band (purple stripe across forehead)
+        ctx.fillStyle = '#7a2aae';
+        ctx.fillRect(bodyX + bodyW * 0.1, hatBaseY, bodyW * 0.8, 4);
+        // Harlequin pattern on body — diagonal gold diamonds
+        ctx.fillStyle = '#ffe14a';
+        for (let dy = 0; dy < 3; dy++) {
+          for (let dx = 0; dx < 2; dx++) {
+            const ddx = bodyX + bodyW * 0.25 + dx * (bodyW * 0.4);
+            const ddy = bodyY + bodyH * (0.45 + dy * 0.16);
+            ctx.beginPath();
+            ctx.moveTo(ddx, ddy - 3);
+            ctx.lineTo(ddx + 4, ddy);
+            ctx.lineTo(ddx, ddy + 3);
+            ctx.lineTo(ddx - 4, ddy);
+            ctx.closePath();
+            ctx.fill();
+          }
+        }
+        // Wide grin (a horizontal red curve below the eyes)
+        ctx.strokeStyle = '#a34040';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(bodyX + bodyW * 0.5, bodyY + 11, 4, 0, Math.PI);
+        ctx.stroke();
       }
       // Angus — chunky thick-rimmed glasses + headphones + scrolling code symbols around body
       if (this.key === 'angus') {
@@ -2395,6 +2529,7 @@
               theo: { main: '#8a4ade', hot: '#4ad7e8' },
               cole: { main: '#ff8a3a', hot: '#ffeb3b' },
               angus: { main: '#39ff14', hot: '#aaffaa' },
+              aidan: { main: '#a04ade', hot: '#ffe14a' },
             };
             const { main: mainColor, hot: hotColor } = palettes[this.key] || { main: '#ffffff', hot: '#ffffff' };
             // filled swipe shape
@@ -3832,21 +3967,29 @@
       if (p.type === 'molotov') p.spin = (p.spin || 0) + 0.4;
       if (p.type === 'igniter') p.spin = (p.spin || 0) + 0.55;
       if (p.type === 'chargedOrb') p.spin = (p.spin || 0) + 0.35;
+      if (p.type === 'lootBox') p.spin = (p.spin || 0) + 0.18;
+      if (p.type === 'cheese') p.spin = (p.spin || 0) + 0.22;
       // Angus grapple — when the hook reaches end-of-life without catching
       // anyone, yank Angus toward the hook's last position (recovery boost).
-      if (p.type === 'grapple' && p.life === 1 && !p.consumed) {
+      // Triggers on any despawn (life==1 from natural expiry, or life<=0 if
+      // off-screen / floor cleared it earlier this frame). Below-stage uses
+      // need a real recovery boost, so the upward component is now substantial.
+      if (p.type === 'grapple' && !p.consumed && (p.life <= 1)) {
         p.consumed = true;
         const owner = p.owner;
         if (owner && owner.respawnTimer === 0) {
           const dx = (p.x + p.w/2) - owner.cx;
           const dy = (p.y + p.h/2) - owner.cy;
           const dist = Math.hypot(dx, dy) || 1;
-          owner.vx = (dx / dist) * 11;
-          owner.vy = (dy / dist) * 13;
-          owner.helpless = false; // boost gives a fresh launch
+          // Hard upward boost, generous enough to reliably reach the stage from
+          // a typical below-stage recovery position. Horizontal pull is gentler
+          // and tracks the hook tip so the player still has some directional input.
+          owner.vx = (dx / dist) * 8;
+          owner.vy = -26;
+          owner.helpless = false;
           owner.jumps = Math.max(owner.jumps, 1);
-          spawnEffect(owner.cx, owner.cy, '#39ff14', 20, 28);
-          spawnEffect(p.x + p.w/2, p.y + p.h/2, '#39ff14', 18, 24);
+          spawnEffect(owner.cx, owner.cy, '#39ff14', 22, 32);
+          spawnEffect(p.x + p.w/2, p.y + p.h/2, '#39ff14', 18, 26);
         }
       }
       if (p.type === 'firePatch') {
@@ -3867,8 +4010,11 @@
         }
       }
 
-      // hit main floor
-      if (p.y + p.h > GROUND_Y && !stationary && p.type !== 'grenade') {
+      // hit main floor — only fire when actually falling INTO the floor. Without
+      // the vy > 0 guard, projectiles that spawn below the stage (e.g. Angus's
+      // grapple hook fired from beneath the platform) get insta-culled even
+      // though they're flying upward and should pass through cleanly.
+      if (p.y + p.h > GROUND_Y && p.vy > 0 && !stationary && p.type !== 'grenade') {
         if (p.type === 'poisonLob') {
           // Spawn a poison cloud where it landed, then despawn
           projectiles.push({
@@ -3911,6 +4057,16 @@
           // Detonate at impact point (charge stored on the projectile)
           detonateChargeBomb(p.owner, p.charge, p.x + p.w/2, GROUND_Y - 4);
           p.life = 0;
+        } else if (p.type === 'lootBox') {
+          // Crate falls and breaks on the floor — small puff, no random effect.
+          p.life = 0;
+          spawnEffect(p.x + p.w/2, p.y + p.h, '#a04ade', 16, 22);
+          spawnEffect(p.x + p.w/2, p.y + p.h, '#ffe14a', 12, 18);
+        } else if (p.type === 'cheese') {
+          // Cheese block splatters; small persistent splat doesn't damage further.
+          p.life = 0;
+          spawnEffect(p.x + p.w/2, p.y + p.h, '#ffe14a', 18, 26);
+          spawnEffect(p.x + p.w/2, p.y + p.h, '#d4a834', 14, 22);
         } else if (p.type === 'fireball') {
           // Bounce a few times, dampening each time, then despawn.
           if ((p.bounces || 0) >= 3) {
@@ -4003,6 +4159,57 @@
           } else if (p.type === 'chargedOrb') {
             // Direct hit detonates at the impact point with the stored charge
             detonateChargeBomb(p.owner, p.charge, p.x + p.w/2, p.y + p.h/2);
+            p.life = 0;
+            break;
+          } else if (p.type === 'lootBox') {
+            // Counter check first
+            if (f.counterActive > 0) {
+              p.owner.takeDamage(p.damage * 1.5, -p.vx * 1.5, -4, f);
+              spawnEffect(f.cx, f.cy, '#ffffff', 20, 36);
+              f.counterActive = 0; f.counterCooldown = 60;
+              p.life = 0;
+              break;
+            }
+            // Apply base damage + a random effect from the loot pool. Uses the
+            // seeded RNG so both clients in online mode see the same result.
+            f.takeDamage(p.damage, p.kbx, p.kby, p.owner);
+            const which = Math.floor(rng() * 5);
+            if (which === 0) {
+              // Poisoned (1.5s extra)
+              f.applyPoison(180);
+              spawnEffect(f.cx, f.cy, '#5aaf3a', 32, 44);
+            } else if (which === 1) {
+              // Doused (4s fueled — vulnerable to fire combos)
+              f.applyFuel(240);
+              spawnEffect(f.cx, f.cy, '#5a4028', 28, 40);
+            } else if (which === 2) {
+              // Slowed — extra hitstun. Halves practical mobility briefly.
+              f.hitstun = Math.max(f.hitstun, 40);
+              spawnEffect(f.cx, f.cy, '#88ddff', 30, 44);
+            } else if (which === 3) {
+              // Big damage bonus
+              f.takeDamage(10, 0, 0, p.owner);
+              spawnEffect(f.cx, f.cy, '#ff4444', 32, 48);
+            } else {
+              // Joke's on the victim — Aidan heals 12% damage
+              p.owner.damage = Math.max(0, p.owner.damage - 12);
+              spawnEffect(p.owner.cx, p.owner.cy, '#aaffaa', 28, 36);
+              spawnEffect(f.cx, f.cy, '#ffe14a', 22, 30);
+            }
+            spawnEffect(p.x + p.w/2, p.y + p.h/2, '#a04ade', 24, 30);
+            p.life = 0;
+            break;
+          } else if (p.type === 'cheese') {
+            // Counter
+            if (f.counterActive > 0) {
+              p.owner.takeDamage(p.damage * 1.5, -p.vx * 1.5, -4, f);
+              spawnEffect(f.cx, f.cy, '#ffffff', 20, 36);
+              f.counterActive = 0; f.counterCooldown = 60;
+              p.life = 0;
+              break;
+            }
+            f.takeDamage(p.damage, p.kbx, p.kby, p.owner);
+            spawnEffect(f.cx, f.cy, '#ffe14a', 24, 32);
             p.life = 0;
             break;
           } else if (p.type === 'grapple') {
@@ -4214,7 +4421,7 @@
           if (atk.moveState && atk.moveState.type && atk.moveState.type.startsWith('atk_')) {
             atk.moveState.hasHit = atk.moveState.hasHit || new Set();
             atk.moveState.hasHit.add(def);
-          } else if (atk.moveState && ['toxHeadbutt','toxPunch','hardPunch','powerPunch','uppercut','bodySlam','ultraSpike','powerBlast'].includes(atk.moveState.type)) {
+          } else if (atk.moveState && ['toxHeadbutt','toxPunch','hardPunch','powerPunch','uppercut','bodySlam','ultraSpike','powerBlast','hammerBonk'].includes(atk.moveState.type)) {
             atk.moveState.hasHit = atk.moveState.hasHit || new Set();
             atk.moveState.hasHit.add(def);
           } else {
@@ -4467,6 +4674,47 @@
                   10 + Math.sin(p.tick * 0.15 + i) * 3, 0, Math.PI*2);
           ctx.fill();
         }
+      } else if (p.type === 'lootBox') {
+        // Tumbling purple/gold gift crate with a question mark
+        const cx = p.x + p.w/2, cy = p.y + p.h/2;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(p.spin || 0);
+        ctx.fillStyle = '#a04ade';
+        ctx.fillRect(-p.w/2, -p.h/2, p.w, p.h);
+        ctx.fillStyle = '#ffe14a';
+        ctx.fillRect(-p.w/2, -1, p.w, 3);
+        ctx.fillRect(-1, -p.h/2, 3, p.h);
+        ctx.fillStyle = '#ffffff';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('?', 0, 4);
+        ctx.textAlign = 'left';
+        ctx.restore();
+        // Sparkle behind
+        if (Math.random() < 0.4) {
+          spawnEffect(cx + (Math.random()-0.5)*16, cy + (Math.random()-0.5)*16, '#ffe14a', 14, 8);
+        }
+      } else if (p.type === 'cheese') {
+        // Yellow wedge with darker triangular holes
+        const cx = p.x + p.w/2, cy = p.y + p.h/2;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(p.spin || 0);
+        // Wedge shape
+        ctx.fillStyle = '#ffe14a';
+        ctx.beginPath();
+        ctx.moveTo(-p.w/2, p.h/2);
+        ctx.lineTo(p.w/2, p.h/2);
+        ctx.lineTo(p.w/2 - 2, -p.h/2);
+        ctx.closePath();
+        ctx.fill();
+        // Holes
+        ctx.fillStyle = '#a08020';
+        ctx.beginPath(); ctx.arc(-2, 0, 2, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(3, 3, 1.6, 0, Math.PI*2); ctx.fill();
+        ctx.beginPath(); ctx.arc(2, -3, 1.4, 0, Math.PI*2); ctx.fill();
+        ctx.restore();
       } else if (p.type === 'codePlatform') {
         // Code-stream platform: glowing green bar with scrolling text effect
         ctx.fillStyle = `rgba(57, 255, 20, ${0.25 + Math.sin(p.tick * 0.15) * 0.08})`;
@@ -4840,10 +5088,10 @@
 
   // ---------- MENU ----------
   let menuPrevKeys = {};
-  let menuStage = 'mode';      // 'mode' | 'code' | 'chars'
-  let menuModeIdx = 0;          // 0=LOCAL, 1=HOST, 2=JOIN
+  let menuStage = 'mode';      // 'mode' | 'code' | 'chars' | 'movesets'
+  let menuModeIdx = 0;          // 0=LOCAL, 1=HOST, 2=JOIN, 3=MOVESETS
   let joinCodeInput = '';
-  const MODE_LABELS = ['LOCAL 2P', 'HOST ONLINE', 'JOIN ONLINE'];
+  const MODE_LABELS = ['LOCAL 2P', 'HOST ONLINE', 'JOIN ONLINE', 'MOVESET KEY'];
   const ROOM_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
   function updateMenu() {
@@ -4852,9 +5100,10 @@
     const tap = (code) => isHeld(code) && !menuPrevKeys[code];
 
     if (menuStage === 'mode') {
-      // P1 cycles between LOCAL/HOST/JOIN with left/right, confirms with special.
-      if (tap(c0.left)) menuModeIdx = (menuModeIdx + 2) % 3;
-      if (tap(c0.right)) menuModeIdx = (menuModeIdx + 1) % 3;
+      // P1 cycles between the 4 mode buttons with left/right, confirms with special.
+      const N = MODE_LABELS.length;
+      if (tap(c0.left)) menuModeIdx = (menuModeIdx + N - 1) % N;
+      if (tap(c0.right)) menuModeIdx = (menuModeIdx + 1) % N;
       if (tap(c0.special)) {
         if (menuModeIdx === 0) {
           net.mode = 'local';
@@ -4862,11 +5111,19 @@
         } else if (menuModeIdx === 1) {
           net.mode = 'host';
           menuStage = 'chars';
-        } else {
+        } else if (menuModeIdx === 2) {
           net.mode = 'guest';
           joinCodeInput = '';
           menuStage = 'code';
+        } else {
+          // MOVESET KEY — open the moveset reference panel.
+          menuStage = 'movesets';
         }
+      }
+    } else if (menuStage === 'movesets') {
+      // Block / Escape returns to mode select.
+      if (tap(c0.block) || tap('Escape')) {
+        menuStage = 'mode';
       }
     } else if (menuStage === 'code') {
       // Cancel back to mode select with block
@@ -4979,26 +5236,96 @@
 
     if (menuStage === 'mode') {
       ctx.fillText('Choose mode', W/2, 108);
-      // Three big buttons centered
-      const btnW = 220, btnH = 70, gapY = 20;
-      const totalH = 3 * btnH + 2 * gapY;
-      const startY = H/2 - totalH/2;
-      for (let m = 0; m < 3; m++) {
-        const by = startY + m * (btnH + gapY);
+      // Four mode buttons in a 2x2 grid
+      const btnW = 220, btnH = 60, gapX = 30, gapY = 16;
+      const totalW = 2 * btnW + gapX;
+      const totalH = 2 * btnH + gapY;
+      const startX = W/2 - totalW/2;
+      const startY = H/2 - totalH/2 + 10;
+      for (let m = 0; m < MODE_LABELS.length; m++) {
+        const col = m % 2, row = (m / 2) | 0;
+        const bx = startX + col * (btnW + gapX);
+        const by = startY + row * (btnH + gapY);
         const sel = m === menuModeIdx;
         ctx.fillStyle = sel ? '#22223a' : '#15151f';
-        ctx.fillRect(W/2 - btnW/2, by, btnW, btnH);
+        ctx.fillRect(bx, by, btnW, btnH);
         ctx.strokeStyle = sel ? '#ff6a2a' : '#3a3a55';
         ctx.lineWidth = sel ? 3 : 1.5;
-        ctx.strokeRect(W/2 - btnW/2, by, btnW, btnH);
+        ctx.strokeRect(bx, by, btnW, btnH);
         ctx.fillStyle = sel ? '#ffeb3b' : '#aaa';
-        ctx.font = 'bold 22px sans-serif';
-        ctx.fillText(MODE_LABELS[m], W/2, by + btnH/2 + 8);
+        ctx.font = 'bold 20px sans-serif';
+        ctx.fillText(MODE_LABELS[m], bx + btnW/2, by + btnH/2 + 7);
       }
       ctx.fillStyle = '#888';
       ctx.font = '12px sans-serif';
       ctx.fillText('P1: A/D cycle, F confirm', W/2, H - 60);
       ctx.fillText('Online play needs the page hosted on a real URL (Netlify Drop / GitHub Pages).', W/2, H - 38);
+      ctx.textAlign = 'left';
+      return;
+    }
+
+    if (menuStage === 'movesets') {
+      // Reference panel showing every character's specials.
+      ctx.fillStyle = '#ffeb3b';
+      ctx.font = 'bold 28px sans-serif';
+      ctx.fillText('MOVESET KEY', W/2, 130);
+      ctx.fillStyle = '#888';
+      ctx.font = '12px sans-serif';
+      ctx.fillText('Special button (F or L) + direction → fires the corresponding special.', W/2, 152);
+
+      // Character rows
+      ctx.textAlign = 'left';
+      const rows = [
+        { key: 'nico',    moves: ['Fireball (bouncing)', 'Burning Dash', 'Fire Propulsion', 'Counter'] },
+        { key: 'derek',   moves: ['Shuriken', 'Hand Crossbow', 'Katana Dash', 'Smoke Bomb'] },
+        { key: 'rhys',    moves: ['Toxic Punch', 'Toxic Headbutt', 'Poison Lob', 'Spore Trap'] },
+        { key: 'greyson', moves: ['Grenade', 'Hard Punch', 'Mega Jump', 'Cmd Grab (pierces shield)'] },
+        { key: 'kele',    moves: ['Power Punch', 'Suplex', 'Uppercut', 'Body Slam'] },
+        { key: 'jonah',   moves: ['Beet Blast', 'Mach 5', 'Glide', 'Ultra Spike'] },
+        { key: 'theo',    moves: ['Charge Orb (projectile)', 'Power Blast', 'Teleport', 'Absorb'] },
+        { key: 'cole',    moves: ['Igniter Toss', 'Gasoline (fuel cost)', 'Rocket Boost', 'Molotov'] },
+        { key: 'angus',   moves: ['Code Disrupter', 'HTML Dash', 'Grappling Hook', 'Code Farm'] },
+        { key: 'aidan',   moves: ['Loot Box (random fx)', 'Hammer Bonk', 'Cannon Launch', 'Cheese Throw'] },
+      ];
+      const rowH = 32;
+      const startRowY = 184;
+      const colHeaders = ['NEUTRAL', 'SIDE', 'UP', 'DOWN'];
+      // Column header
+      ctx.fillStyle = '#666';
+      ctx.font = 'bold 11px sans-serif';
+      const colXs = [240, 410, 580, 760];
+      for (let h = 0; h < 4; h++) ctx.fillText(colHeaders[h], colXs[h], startRowY - 8);
+      // Rows
+      for (let r = 0; r < rows.length; r++) {
+        const row = rows[r];
+        const ch = CHARS[row.key];
+        if (!ch) continue;
+        const ry = startRowY + r * rowH;
+        // Character icon (mini portrait) + name
+        ctx.fillStyle = ch.color;
+        ctx.fillRect(30, ry, 16, 22);
+        ctx.fillStyle = ch.color2;
+        ctx.fillRect(30, ry + 8, 16, 4);
+        ctx.fillStyle = '#ffddba';
+        ctx.fillRect(33, ry - 6, 10, 8);
+        ctx.fillStyle = ch.color;
+        ctx.font = 'bold 13px sans-serif';
+        ctx.fillText(ch.name, 56, ry + 14);
+        ctx.fillStyle = '#888';
+        ctx.font = '10px sans-serif';
+        ctx.fillText(ch.archetype, 56, ry + 26);
+        // Moves
+        ctx.fillStyle = '#ddd';
+        ctx.font = '11px sans-serif';
+        for (let c = 0; c < 4; c++) {
+          ctx.fillText(row.moves[c], colXs[c], ry + 16);
+        }
+      }
+      // Footer
+      ctx.fillStyle = '#888';
+      ctx.font = '12px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('L-SHIFT or ESC → back to mode select', W/2, H - 24);
       ctx.textAlign = 'left';
       return;
     }
@@ -5048,7 +5375,8 @@
     // Dynamic card layout for any roster size
     const N = CHAR_KEYS.length;
     let cardW, cardH, gap;
-    if (N >= 9) { cardW = 96; cardH = 168; gap = 5; }
+    if (N >= 10) { cardW = 88; cardH = 156; gap = 4; }
+    else if (N >= 9) { cardW = 96; cardH = 168; gap = 5; }
     else if (N >= 8) { cardW = 104; cardH = 178; gap = 6; }
     else if (N >= 7) { cardW = 118; cardH = 190; gap = 8; }
     else if (N >= 6) { cardW = 130; cardH = 200; gap = 10; }
@@ -5255,25 +5583,7 @@
     ctx.fillStyle = ready ? '#4ab8ff' : '#555';
     ctx.font = 'bold 14px sans-serif';
     ctx.fillText(label, W/2, H - 32);
-
-    // Move list hint
-    ctx.font = '10px monospace';
-    ctx.fillStyle = '#666';
-    ctx.textAlign = 'left';
-    const hints = [
-      'Nico    (Rushdown):    neutral→Fireball     side→Burn Dash    up→Fire Propel  down→Counter',
-      'Derek   (Zoner):       neutral→Shuriken     side→Crossbow     up→Katana Dash  down→Smoke Bomb',
-      'Rhys    (Trapper):     neutral→Tox Punch    side→Tox Headbutt up→Poison Lob   down→Spore Trap  · specials poison 1.5s',
-      'Greyson (Hybrid):      neutral→Grenade      side→Hard Punch   up→Mega Jump    down→Cmd Grab  · grab pierces shield',
-      'Kele    (Heavyweight): neutral→Power Punch  side→Suplex       up→Uppercut     down→Body Slam · slow, huge damage',
-      'Jonah   (Flier):       neutral→Beet Blast   side→Mach 5       up→Glide        down→Ultra Spike · 5 jumps, floaty',
-      'Theo    (Controller):  neutral→Charge Orb   side→Power Blast  up→Teleport     down→Absorb · charge orb is a flying projectile',
-      'Cole    (Pyromaniac):  neutral→Igniter Toss side→Gasoline     up→Rocket Boost down→Molotov   · fuel meter; gas + igniter combo',
-      'Angus   (Hacker):      neutral→Code Disrupt side→HTML Dash    up→Grapple Hook down→Code Farm · code meter charges from damage',
-    ];
-    for (let hi = 0; hi < hints.length; hi++) {
-      ctx.fillText(hints[hi], 30, H - 205 + hi * 15);
-    }
+    // Movesets reference now lives on the mode-select screen as its own option.
     ctx.textAlign = 'left';
   }
 
