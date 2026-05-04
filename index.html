@@ -1032,14 +1032,18 @@
         };
         this.vx += this.facing * 1.5;
       } else if (dir === 'up') {
-        // Cannon Launch — speedy upward burst (recovery). Helpless after if airborne.
+        // Cannon Launch — punchy upward burst with visible cannon at feet.
+        // Stronger than a typical recovery — vy=-21, with extra invuln frames.
         this.moveState = { type: 'cannonLaunch', timer: 22 };
-        this.vy = -17;
+        this.vy = -21;
         this.vx = this.facing * 1.5;
         this.jumps = Math.max(this.jumps, 1);
-        this.invuln = 8;
-        spawnEffect(this.cx, this.y + this.h, '#ffe14a', 26, 30);
-        spawnEffect(this.cx, this.y + this.h + 6, '#a04ade', 22, 26);
+        this.invuln = 12;
+        // Big launch flash
+        spawnEffect(this.cx, this.y + this.h + 4, '#ffffff', 22, 28);
+        spawnEffect(this.cx, this.y + this.h + 6, '#ffe14a', 28, 44);
+        spawnEffect(this.cx, this.y + this.h + 8, '#ff8a3a', 24, 50);
+        spawnEffect(this.cx, this.y + this.h + 10, '#a04ade', 22, 36);
       } else if (dir === 'down') {
         // Cheese Throw — lobbed yellow block that arcs up and falls.
         this.moveState = { type: 'cheeseThrow', timer: 22 };
@@ -3498,6 +3502,177 @@
           ctx.beginPath();
           ctx.arc(bx, by - 9, 1.2, 0, Math.PI*2);
           ctx.fill();
+        }
+        // -- AIDAN POLISH --
+        // Hammer Bonk — a real hammer sprite (wooden handle + heavy metal head)
+        // that arcs from a cocked-back windup pose to a forward slam during the
+        // active frames, then is held forward through recovery.
+        if (t === 'hammerBonk') {
+          const elapsed = 32 - this.moveState.timer;
+          const fwd = this.facing;
+          // Map elapsed → swing angle. Windup (0–9): hammer back & up (–135°).
+          // Active (10–18): hammer slams forward (–135° → +30°). Recovery (19–31):
+          // settles slightly back to +0°.
+          let ang;
+          if (elapsed < 10) {
+            const t01 = elapsed / 10;
+            ang = -2.35 + (-0.3) * t01; // hover further back
+          } else if (elapsed <= 18) {
+            const t01 = (elapsed - 10) / 8;
+            // Ease-out the swing for a satisfying snap
+            const e = 1 - Math.pow(1 - t01, 2);
+            ang = -2.65 + e * 3.05; // -135° → +40°
+          } else {
+            const t01 = Math.min(1, (elapsed - 18) / 8);
+            ang = 0.4 - t01 * 0.4;
+          }
+          // Hand position at Aidan's chest height
+          const hx = this.cx + fwd * 4;
+          const hy = this.cy - 2;
+          // Hammer geometry — handle length 32, head 14×20
+          const handleLen = 32;
+          const tipX = hx + Math.cos(ang) * fwd * handleLen;
+          const tipY = hy + Math.sin(ang) * handleLen;
+          // Wooden handle (drawn first, behind)
+          ctx.strokeStyle = '#8a5a2a';
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.moveTo(hx, hy);
+          ctx.lineTo(tipX, tipY);
+          ctx.stroke();
+          ctx.strokeStyle = '#5a3a18';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          // Hammer head — rectangle perpendicular to handle direction
+          ctx.save();
+          ctx.translate(tipX, tipY);
+          ctx.rotate(ang + Math.PI / 2);
+          // Outer metal
+          ctx.fillStyle = '#666';
+          ctx.fillRect(-10, -7, 20, 14);
+          // Inner highlight
+          ctx.fillStyle = '#999';
+          ctx.fillRect(-9, -6, 18, 4);
+          // Side accents
+          ctx.fillStyle = '#444';
+          ctx.fillRect(-10, 5, 20, 2);
+          // Gold band in the middle (jester flair)
+          ctx.fillStyle = '#ffe14a';
+          ctx.fillRect(-2, -7, 4, 14);
+          ctx.restore();
+          // Impact burst on the active frame the hammer first contacts
+          if (elapsed === 13) {
+            spawnEffect(tipX, tipY, '#ffe14a', 22, 30);
+            spawnEffect(tipX, tipY, '#ffffff', 16, 22);
+          }
+          // Speed-line streaks during the swing
+          if (elapsed > 9 && elapsed < 18) {
+            ctx.strokeStyle = `rgba(255, 225, 74, ${0.6 - (elapsed - 9) / 18})`;
+            ctx.lineWidth = 2;
+            for (let k = 0; k < 3; k++) {
+              const r = 22 + k * 6;
+              const a1 = ang - 0.4;
+              ctx.beginPath();
+              ctx.arc(hx, hy, r, a1, a1 + 0.6);
+              ctx.stroke();
+            }
+          }
+        }
+        // Cannon Launch — a chunky black cannon at Aidan's feet that fires
+        // straight up, with muzzle flash, smoke ring, and rising sparks.
+        if (t === 'cannonLaunch') {
+          const elapsed = 22 - this.moveState.timer;
+          // Cannon barrel at the feet; recoils slightly downward over time.
+          const cx = this.cx;
+          const baseY = this.y + this.h + 2;
+          const recoil = Math.min(8, elapsed * 1.5);
+          // Cannon body — rectangle pointing up
+          ctx.fillStyle = '#1a1a1a';
+          ctx.fillRect(cx - 12, baseY + recoil - 4, 24, 18);
+          // Wood/metal ring base
+          ctx.fillStyle = '#8a5a2a';
+          ctx.fillRect(cx - 14, baseY + recoil + 8, 28, 6);
+          // Cannon mouth + bore
+          ctx.fillStyle = '#0a0a0a';
+          ctx.fillRect(cx - 8, baseY + recoil - 8, 16, 6);
+          ctx.fillStyle = '#000';
+          ctx.fillRect(cx - 5, baseY + recoil - 10, 10, 4);
+          // Wheels at the base
+          ctx.fillStyle = '#5a3a18';
+          ctx.beginPath(); ctx.arc(cx - 12, baseY + recoil + 11, 4, 0, Math.PI*2); ctx.fill();
+          ctx.beginPath(); ctx.arc(cx + 12, baseY + recoil + 11, 4, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = '#222';
+          ctx.beginPath(); ctx.arc(cx - 12, baseY + recoil + 11, 1.5, 0, Math.PI*2); ctx.fill();
+          ctx.beginPath(); ctx.arc(cx + 12, baseY + recoil + 11, 1.5, 0, Math.PI*2); ctx.fill();
+          // Muzzle flash on the very first few frames
+          if (elapsed < 5) {
+            const flashAge = elapsed;
+            const fr = 14 - flashAge * 2;
+            // Outer red
+            ctx.fillStyle = `rgba(255, 80, 60, ${0.7 - flashAge * 0.12})`;
+            ctx.beginPath();
+            ctx.arc(cx, baseY - 6, fr + 6, 0, Math.PI*2);
+            ctx.fill();
+            // Mid orange
+            ctx.fillStyle = `rgba(255, 138, 58, ${0.85 - flashAge * 0.15})`;
+            ctx.beginPath();
+            ctx.arc(cx, baseY - 6, fr + 2, 0, Math.PI*2);
+            ctx.fill();
+            // Inner yellow / white-hot
+            ctx.fillStyle = `rgba(255, 235, 59, ${1 - flashAge * 0.15})`;
+            ctx.beginPath();
+            ctx.arc(cx, baseY - 6, fr - 2, 0, Math.PI*2);
+            ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(cx, baseY - 6, Math.max(0, fr - 6), 0, Math.PI*2);
+            ctx.fill();
+          }
+          // Smoke ring expanding outward at base
+          if (elapsed < 14) {
+            const ringR = 8 + elapsed * 3;
+            const ringAlpha = Math.max(0, 0.6 - elapsed * 0.04);
+            ctx.strokeStyle = `rgba(140, 140, 140, ${ringAlpha})`;
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            ctx.ellipse(cx, baseY + 14, ringR, ringR * 0.4, 0, 0, Math.PI * 2);
+            ctx.stroke();
+          }
+          // Smoke puffs at the muzzle, rising and dispersing
+          if (Math.random() < 0.85) {
+            spawnEffect(cx + (Math.random() - 0.5) * 14, baseY - 12 - elapsed * 0.5, '#888', 22, 14);
+          }
+          if (Math.random() < 0.5) {
+            spawnEffect(cx + (Math.random() - 0.5) * 8, baseY - 18, '#ddd', 18, 10);
+          }
+          // Bright sparks trailing Aidan upward
+          if (elapsed < 8) {
+            for (let k = 0; k < 2; k++) {
+              spawnEffect(this.cx + (Math.random() - 0.5) * 14, this.y + this.h - 4 + k * 6, '#ffe14a', 14, 8);
+            }
+          }
+        }
+        // Loot Box — sparkles around Aidan during the lob windup
+        if (t === 'lootBox' && this.moveState.timer > 14) {
+          if (Math.random() < 0.5) {
+            spawnEffect(this.cx + (Math.random()-0.5)*30, this.cy + (Math.random()-0.5)*30, '#ffe14a', 16, 8);
+          }
+        }
+        // Cheese Throw — windup pose with the wedge in hand
+        if (t === 'cheeseThrow' && this.moveState.timer > 14) {
+          const fwd = this.facing;
+          const hx = this.cx + fwd * 6;
+          const hy = this.cy - 16;
+          ctx.fillStyle = '#ffe14a';
+          ctx.beginPath();
+          ctx.moveTo(hx - 7, hy + 4);
+          ctx.lineTo(hx + 7, hy + 4);
+          ctx.lineTo(hx + 5, hy - 5);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = '#a08020';
+          ctx.beginPath(); ctx.arc(hx - 1, hy + 1, 1.6, 0, Math.PI*2); ctx.fill();
+          ctx.beginPath(); ctx.arc(hx + 3, hy + 2, 1.2, 0, Math.PI*2); ctx.fill();
         }
         // Kele: Suplex — reaching grab, then overhead hold indicator
         if (t === 'suplex') {
