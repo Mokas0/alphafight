@@ -1,0 +1,432 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>ALPHA BRAWL // Tournament Pitch</title>
+<style>
+  :root {
+    --bg0: #0a0a14;
+    --bg1: #1a1a28;
+    --bg2: #22223a;
+    --p1:  #ff6a2a;
+    --p2:  #4ab8ff;
+    --acc: #ffeb3b;
+    --grn: #39ff14;
+    --pur: #b088ff;
+    --txt: #f0f0f5;
+    --dim: #888;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100vh; width: 100vw;
+    background: var(--bg0);
+    color: var(--txt);
+    font-family: 'Courier New', 'Lucida Console', monospace;
+    overflow: hidden;
+    image-rendering: pixelated;
+  }
+  /* Pixel grid backdrop */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background:
+      linear-gradient(180deg, transparent 23px, rgba(255, 106, 42, 0.04) 24px),
+      linear-gradient(90deg,  transparent 23px, rgba(74, 184, 255, 0.04) 24px);
+    background-size: 24px 24px;
+    pointer-events: none;
+    z-index: 0;
+  }
+  /* Soft scanline overlay for CRT feel */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.18), rgba(0,0,0,0.18) 1px, transparent 1px, transparent 3px);
+    pointer-events: none;
+    z-index: 100;
+  }
+  .stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .slide {
+    position: absolute; inset: 40px 60px 80px 60px;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+  }
+  .slide.active { display: flex; animation: pop 0.3s steps(4); }
+  @keyframes pop {
+    0%   { transform: translateY(8px); opacity: 0; }
+    100% { transform: translateY(0);   opacity: 1; }
+  }
+  /* HUD: page counter + nav hint */
+  .hud {
+    position: fixed; left: 0; right: 0; bottom: 14px;
+    display: flex; justify-content: space-between;
+    padding: 0 24px;
+    color: var(--dim); font-size: 13px;
+    z-index: 5;
+  }
+  .hud .keys span {
+    background: var(--bg1);
+    border: 1px solid #3a3a55;
+    padding: 2px 8px; margin: 0 2px; color: var(--txt); border-radius: 3px;
+  }
+  .pulse { animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0.3; } }
+
+  /* Big pixel-style title chunks */
+  h1 {
+    font-size: 76px; line-height: 1; letter-spacing: 6px;
+    text-shadow: 4px 4px 0 #000, 8px 8px 0 var(--bg1);
+    margin-bottom: 24px; text-align: center;
+  }
+  h2 {
+    font-size: 36px; letter-spacing: 4px;
+    text-shadow: 3px 3px 0 #000;
+    margin-bottom: 30px; text-align: center;
+  }
+  h3 { font-size: 20px; letter-spacing: 2px; color: var(--acc); margin-bottom: 16px; }
+  p { font-size: 19px; line-height: 1.55; max-width: 820px; text-align: center; }
+  ul { list-style: none; font-size: 19px; line-height: 1.7; max-width: 820px; }
+  ul li { padding-left: 24px; position: relative; }
+  ul li::before {
+    content: '▸'; position: absolute; left: 0; color: var(--acc);
+  }
+
+  .alpha { color: var(--p1); }
+  .brawl { color: var(--p2); }
+  .acc   { color: var(--acc); }
+  .grn   { color: var(--grn); }
+  .pur   { color: var(--pur); }
+  .dim   { color: var(--dim); }
+
+  /* Box panel — used a lot */
+  .panel {
+    background: var(--bg1);
+    border: 2px solid var(--p1);
+    padding: 22px 28px;
+    box-shadow: 6px 6px 0 var(--bg2);
+    margin: 10px 0;
+  }
+  .panel.blue { border-color: var(--p2); }
+  .panel.acc  { border-color: var(--acc); }
+  .panel.grn  { border-color: var(--grn); }
+
+  /* Grid for stat / feature blocks */
+  .grid {
+    display: grid; gap: 14px;
+    margin-top: 10px;
+  }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .stat {
+    background: var(--bg1);
+    border: 2px solid #3a3a55;
+    padding: 14px 18px;
+    text-align: center;
+  }
+  .stat .num { font-size: 38px; color: var(--acc); display: block; }
+  .stat .lbl { font-size: 12px; color: var(--dim); letter-spacing: 2px; }
+
+  /* Roster row of mini character cards */
+  .roster { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 16px; }
+  .ch {
+    width: 76px; padding: 8px 4px;
+    background: var(--bg1);
+    border-top: 3px solid currentColor;
+    text-align: center;
+    font-size: 11px;
+  }
+  .ch .body {
+    width: 28px; height: 38px;
+    margin: 4px auto;
+    background: currentColor;
+    position: relative;
+  }
+  .ch .body::before {
+    content: ''; position: absolute; top: -10px; left: 6px;
+    width: 16px; height: 12px; background: #ffddba;
+  }
+  .ch .name { color: #fff; letter-spacing: 1px; font-weight: bold; }
+  .ch .arch { color: var(--dim); font-size: 9px; }
+
+  /* Schedule timeline */
+  .timeline {
+    display: flex; align-items: stretch; width: 100%;
+    margin: 24px 0; height: 60px;
+    border: 2px solid var(--p2);
+    background: var(--bg1);
+    overflow: hidden;
+  }
+  .timeline .seg {
+    flex-grow: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    border-right: 2px solid var(--p2);
+    font-size: 12px;
+    text-align: center;
+    padding: 4px;
+  }
+  .timeline .seg:last-child { border-right: none; }
+  .timeline .seg .min { color: var(--acc); font-weight: bold; font-size: 14px; }
+  .timeline .seg .lbl { color: var(--txt); margin-top: 2px; }
+
+  /* Big call-to-action button */
+  .cta {
+    margin-top: 32px;
+    background: var(--p1);
+    color: var(--bg0);
+    font-size: 26px;
+    padding: 18px 36px;
+    border: none;
+    letter-spacing: 4px;
+    font-family: inherit;
+    font-weight: bold;
+    box-shadow: 6px 6px 0 var(--p2);
+    cursor: pointer;
+  }
+
+  .ascii {
+    color: var(--p1);
+    font-size: 11px; line-height: 1.05;
+    white-space: pre;
+    margin-top: 18px;
+    text-align: center;
+  }
+
+  /* Tiny in-page progress bar */
+  .progress {
+    position: fixed; left: 0; top: 0; height: 4px;
+    background: linear-gradient(90deg, var(--p1), var(--p2), var(--acc));
+    z-index: 5;
+    transition: width 0.2s steps(8);
+  }
+
+  .stamp {
+    color: var(--dim);
+    font-size: 11px;
+    letter-spacing: 3px;
+    margin-top: 8px;
+  }
+
+  /* Pixel "screenshot" mock */
+  .mock {
+    width: 480px; height: 200px;
+    background: linear-gradient(180deg, #1a1a28, #22223a);
+    border: 3px solid var(--p1);
+    box-shadow: 6px 6px 0 var(--bg2);
+    position: relative;
+    margin: 16px auto;
+    overflow: hidden;
+  }
+  .mock .stage-fl {
+    position: absolute; left: 80px; right: 80px; bottom: 60px;
+    height: 8px; background: #2f2f48; border-top: 4px solid #3a3a55;
+  }
+  .mock .figure {
+    position: absolute; bottom: 76px;
+    width: 22px; height: 38px;
+  }
+  .mock .figure::before {
+    content: ''; position: absolute; top: -12px; left: 4px;
+    width: 14px; height: 12px; background: #ffddba;
+  }
+  .mock .f1 { left: 140px; background: var(--p1); }
+  .mock .f2 { left: 320px; background: var(--p2); }
+  .mock .vs {
+    position: absolute; top: 50%; left: 50%;
+    transform: translate(-50%, -50%);
+    color: var(--acc); font-size: 32px; letter-spacing: 4px;
+    text-shadow: 3px 3px 0 #000;
+  }
+  .mock .hud-bar {
+    position: absolute; bottom: 8px; left: 8px; right: 8px;
+    display: flex; justify-content: space-between;
+    color: var(--dim); font-size: 9px;
+    letter-spacing: 2px;
+  }
+</style>
+
+<div class="progress" id="progress"></div>
+<div class="stage">
+
+  <!-- ============ SLIDE 1: TITLE ============ -->
+  <div class="slide active" data-slide>
+    <h1><span class="alpha">ALPHA</span> <span class="brawl">BRAWL</span></h1>
+    <h3 class="acc">// FRIDAY GAMER LUNCH TOURNAMENT //</h3>
+    <p class="dim" style="margin-top: 8px; letter-spacing: 3px;">A pitch by — [YOUR NAME]</p>
+    <div class="ascii">┌──────────────────────────────────────────┐
+│  10 FIGHTERS · 30 MINUTES · 1 CHAMPION   │
+└──────────────────────────────────────────┘</div>
+    <p class="stamp pulse">PRESS → TO START</p>
+  </div>
+
+  <!-- ============ SLIDE 2: THE HOOK ============ -->
+  <div class="slide" data-slide>
+    <h2>THE HOOK</h2>
+    <div class="panel" style="max-width: 760px;">
+      <p style="font-size: 22px; line-height: 1.7; text-align: left;">
+        Friday Gamer Lunch is a <span class="acc">30-minute slot</span> with no
+        main event.
+      </p>
+      <p style="font-size: 22px; line-height: 1.7; text-align: left; margin-top: 14px;">
+        I built a <span class="alpha">2D fighting game</span> that runs in the
+        browser — single file, no install, local + online play.
+      </p>
+      <p style="font-size: 22px; line-height: 1.7; text-align: left; margin-top: 14px;">
+        Let's run a <span class="brawl">whole-school tournament</span> in 30 min.
+      </p>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 3: WHAT IS ALPHA BRAWL ============ -->
+  <div class="slide" data-slide>
+    <h2>WHAT IS <span class="alpha">ALPHA</span> <span class="brawl">BRAWL</span>?</h2>
+    <div class="mock">
+      <div class="figure f1"></div>
+      <div class="figure f2"></div>
+      <div class="vs">VS</div>
+      <div class="stage-fl"></div>
+      <div class="hud-bar"><span>P1  47%</span><span>P2  82%</span></div>
+    </div>
+    <ul style="margin-top: 8px;">
+      <li>Side-on platform fighter — Smash Bros style, browser-only</li>
+      <li>Stock matches: knock the opponent off the stage 3 times</li>
+      <li>Local 2-player on one keyboard <em>or</em> online over WebRTC</li>
+      <li>Built from scratch — no engine, no installs, no logins</li>
+    </ul>
+  </div>
+
+  <!-- ============ SLIDE 4: ROSTER ============ -->
+  <div class="slide" data-slide>
+    <h2>10-CHARACTER ROSTER</h2>
+    <p class="dim">Each fighter has 4 specials, full aerials, and a unique kit.</p>
+    <div class="roster">
+      <div class="ch" style="color: #ff6a2a;"><div class="body"></div><div class="name">NICO</div><div class="arch">RUSHDOWN</div></div>
+      <div class="ch" style="color: #4ab8ff;"><div class="body"></div><div class="name">DEREK</div><div class="arch">ZONER</div></div>
+      <div class="ch" style="color: #5aaf3a;"><div class="body"></div><div class="name">RHYS</div><div class="arch">TRAPPER</div></div>
+      <div class="ch" style="color: #6a7a4a;"><div class="body"></div><div class="name">GREYSON</div><div class="arch">HYBRID</div></div>
+      <div class="ch" style="color: #a34040;"><div class="body"></div><div class="name">KELE</div><div class="arch">HEAVY</div></div>
+      <div class="ch" style="color: #e070b0;"><div class="body"></div><div class="name">JONAH</div><div class="arch">FLIER</div></div>
+      <div class="ch" style="color: #8a4ade;"><div class="body"></div><div class="name">THEO</div><div class="arch">CONTROL</div></div>
+      <div class="ch" style="color: #ff8a3a;"><div class="body"></div><div class="name">COLE</div><div class="arch">PYRO</div></div>
+      <div class="ch" style="color: #39ff14;"><div class="body"></div><div class="name">ANGUS</div><div class="arch">HACKER</div></div>
+      <div class="ch" style="color: #a04ade;"><div class="body"></div><div class="name">AIDAN</div><div class="arch">JESTER</div></div>
+    </div>
+    <p class="stamp">SPEED · POWER · WEIGHT — every fighter trades off differently</p>
+  </div>
+
+  <!-- ============ SLIDE 5: WHY IT FITS FGL ============ -->
+  <div class="slide" data-slide>
+    <h2>WHY IT FITS <span class="acc">FRIDAY GAMER LUNCH</span></h2>
+    <div class="grid cols-2" style="width: 760px;">
+      <div class="stat"><span class="num">0s</span><span class="lbl">INSTALL TIME</span></div>
+      <div class="stat"><span class="num">2</span><span class="lbl">KEYBOARDS = 2 PLAYERS</span></div>
+      <div class="stat"><span class="num">~1m</span><span class="lbl">AVG MATCH LENGTH (1-stock)</span></div>
+      <div class="stat"><span class="num">10</span><span class="lbl">CHARACTERS = NO STALENESS</span></div>
+    </div>
+    <div class="panel blue" style="margin-top: 18px; max-width: 800px;">
+      <p style="text-align: left; font-size: 18px;">
+        Open the page on any laptop. Two friends share the keyboard
+        (<span class="acc">WASD</span> vs <span class="acc">Arrows</span>),
+        OR each grabs their own laptop and joins via 6-char room code.
+        That's it.
+      </p>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 6: TOURNAMENT FORMAT ============ -->
+  <div class="slide" data-slide>
+    <h2>TOURNAMENT FORMAT — <span class="acc">30 MIN</span></h2>
+    <div class="timeline">
+      <div class="seg" style="flex-grow: 1;"><span class="min">5m</span><span class="lbl">SETUP +<br>RULES</span></div>
+      <div class="seg" style="flex-grow: 4;"><span class="min">18m</span><span class="lbl">BRACKET<br>(1-stock matches)</span></div>
+      <div class="seg" style="flex-grow: 2;"><span class="min">5m</span><span class="lbl">FINALS<br>(3-stock)</span></div>
+      <div class="seg" style="flex-grow: 1;"><span class="min">2m</span><span class="lbl">CROWN<br>WINNER</span></div>
+    </div>
+    <ul style="font-size: 17px; max-width: 820px;">
+      <li>Up to <span class="acc">16 players</span>, single-elimination bracket</li>
+      <li>Rounds 1–3: <span class="grn">1-stock</span> matches (60–90 sec each)</li>
+      <li>Finals: <span class="brawl">3-stock</span>, best fighter wins</li>
+      <li>2 laptops running parallel matches → cuts bracket time in half</li>
+    </ul>
+  </div>
+
+  <!-- ============ SLIDE 7: WHAT WE NEED ============ -->
+  <div class="slide" data-slide>
+    <h2>WHAT WE NEED</h2>
+    <div class="grid cols-3" style="width: 800px; margin-top: 8px;">
+      <div class="stat"><span class="num">2</span><span class="lbl">LAPTOPS</span></div>
+      <div class="stat"><span class="num">1</span><span class="lbl">SCREEN /<br>PROJECTOR</span></div>
+      <div class="stat"><span class="num">0</span><span class="lbl">SOFTWARE<br>INSTALLS</span></div>
+    </div>
+    <div class="panel grn" style="margin-top: 16px; max-width: 800px;">
+      <h3 class="grn" style="text-align: center;">GAME IS LIVE AT:</h3>
+      <p class="acc" style="font-size: 22px; letter-spacing: 2px;">
+        github.com/Mokas0/alphafight → GitHub Pages
+      </p>
+      <p class="dim" style="font-size: 14px; margin-top: 8px;">
+        Open a tab. Pick a fighter. That's the whole onboarding.
+      </p>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 8: CALL TO ACTION ============ -->
+  <div class="slide" data-slide>
+    <h2><span class="alpha">LET'S</span> <span class="brawl">RUN IT</span></h2>
+    <p style="font-size: 22px; max-width: 720px;">
+      Friday Gamer Lunch + a homemade fighting game built by an Alpha
+      student =
+    </p>
+    <p style="font-size: 28px; color: var(--acc); margin-top: 12px; letter-spacing: 3px;">
+      THE BEST 30 MINUTES OF YOUR WEEK.
+    </p>
+    <div class="panel acc" style="margin-top: 26px;">
+      <p style="font-size: 22px; letter-spacing: 2px; color: var(--acc);">
+        ▸ Sign me up to host this Friday ◂
+      </p>
+    </div>
+    <p class="stamp pulse" style="margin-top: 30px;">PRESS → TO RESTART</p>
+  </div>
+
+</div>
+
+<div class="hud">
+  <div>
+    <span class="alpha">ALPHA</span> <span class="brawl">BRAWL</span>
+    <span class="dim">// PITCH DECK</span>
+  </div>
+  <div class="keys">
+    <span>←</span> <span>→</span> <span class="dim">navigate</span>
+    &nbsp;·&nbsp;
+    <span>F</span> <span class="dim">fullscreen</span>
+  </div>
+  <div id="counter">1 / 8</div>
+</div>
+
+<script>
+(() => {
+  const slides = [...document.querySelectorAll('[data-slide]')];
+  const counter = document.getElementById('counter');
+  const progress = document.getElementById('progress');
+  let i = 0;
+  function show(n) {
+    n = ((n % slides.length) + slides.length) % slides.length;
+    slides.forEach((s, k) => s.classList.toggle('active', k === n));
+    counter.textContent = (n + 1) + ' / ' + slides.length;
+    progress.style.width = (((n + 1) / slides.length) * 100) + '%';
+    i = n;
+  }
+  show(0);
+  document.addEventListener('keydown', e => {
+    if (e.code === 'ArrowRight' || e.code === 'Space' || e.code === 'PageDown') show(i + 1);
+    else if (e.code === 'ArrowLeft' || e.code === 'PageUp') show(i - 1);
+    else if (e.code === 'Home') show(0);
+    else if (e.code === 'End') show(slides.length - 1);
+    else if (e.code === 'KeyF') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+      else document.exitFullscreen?.();
+    }
+  });
+  // Click anywhere to advance — useful when projecting from a touch trackpad
+  document.addEventListener('click', () => show(i + 1));
+})();
+</script>
