@@ -4511,17 +4511,36 @@
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
         { urls: 'stun:stun.cloudflare.com:3478' },
-        // ExpressTURN relay — three URL variants. Browsers pick whichever
-        // ones make it through the local network's firewall:
-        //   - UDP/3478  (fastest, blocked by some strict firewalls)
-        //   - TCP/3478  (works through more firewalls; slower)
-        //   - TLS/5349  (TURNS — looks like HTTPS to firewalls, most resilient)
+        // ExpressTURN relay — primary host plus alternate hostname. Some ISPs
+        // / DNS providers block the `free.expressturn.com` domain (we've seen
+        // err 701 "TURN host lookup received error" from real users), so we
+        // also list `relay1.expressturn.com` which routes to the same backend
+        // through different DNS records.
         { urls: 'turn:free.expressturn.com:3478?transport=udp',
           username: TURN_USER, credential: TURN_PASS },
         { urls: 'turn:free.expressturn.com:3478?transport=tcp',
           username: TURN_USER, credential: TURN_PASS },
         { urls: 'turns:free.expressturn.com:5349?transport=tcp',
           username: TURN_USER, credential: TURN_PASS },
+        { urls: 'turn:relay1.expressturn.com:3478?transport=udp',
+          username: TURN_USER, credential: TURN_PASS },
+        { urls: 'turn:relay1.expressturn.com:3478?transport=tcp',
+          username: TURN_USER, credential: TURN_PASS },
+        { urls: 'turns:relay1.expressturn.com:5349?transport=tcp',
+          username: TURN_USER, credential: TURN_PASS },
+        // OpenRelay (metered.ca) — public free TURN with shared credentials.
+        // Different DNS / different ASN, so if ExpressTURN is DNS-blocked on
+        // a given network this one usually still resolves. Ports 80 and 443
+        // are also offered specifically to slip through firewalls that block
+        // 3478/5349.
+        { urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443',
+          username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject', credential: 'openrelayproject' },
+        { urls: 'turns:openrelay.metered.ca:443',
+          username: 'openrelayproject', credential: 'openrelayproject' },
       ],
     },
     debug: 2, // 0=disable, 1=errors, 2=errors+warnings, 3=all
