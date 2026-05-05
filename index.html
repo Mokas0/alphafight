@@ -4488,31 +4488,43 @@
   // PeerJS config — STUN servers for NAT discovery, plus an ExpressTURN relay
   // for the strict-NAT/firewall case (school WiFi, etc.) where peers can't
   // open a direct path. STUN is tried first, TURN is the fallback.
+  //
+  // DEBUG: append ?relay (or #relay) to the URL to force iceTransportPolicy
+  // = 'relay' — every connection is routed through TURN, bypassing STUN
+  // entirely. Use this to confirm whether TURN itself is reachable on a
+  // given network. If the lobby connects in relay mode but not without it,
+  // the issue is the direct WebRTC path (NAT). If it doesn't connect even
+  // in relay mode, the TURN server / credentials are the problem.
+  const RELAY_ONLY = (typeof location !== 'undefined') &&
+    (/[?&#]relay\b/.test(location.href) || location.hash === '#relay');
+  const TURN_USER = '000000002093369940';
+  const TURN_PASS = 'Y/zMMXHaf5XftH1Mg9O5WOlbFfY=';
   const PEER_CONFIG = {
     config: {
+      iceTransportPolicy: RELAY_ONLY ? 'relay' : 'all',
       iceServers: [
+        // STUN — direct peer discovery (skipped if RELAY_ONLY)
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
         { urls: 'stun:stun.cloudflare.com:3478' },
-        // ExpressTURN relay — used only when a direct STUN-discovered path
-        // can't be established (strict NAT / corporate firewall / school WiFi).
-        // UDP first, then TCP/443 fallback for networks that block UDP.
-        {
-          urls: 'turn:free.expressturn.com:3478',
-          username: '000000002093369940',
-          credential: 'Y/zMMXHaf5XftH1Mg9O5WOlbFfY=',
-        },
-        {
-          urls: 'turn:free.expressturn.com:3478?transport=tcp',
-          username: '000000002093369940',
-          credential: 'Y/zMMXHaf5XftH1Mg9O5WOlbFfY=',
-        },
+        // ExpressTURN relay — three URL variants. Browsers pick whichever
+        // ones make it through the local network's firewall:
+        //   - UDP/3478  (fastest, blocked by some strict firewalls)
+        //   - TCP/3478  (works through more firewalls; slower)
+        //   - TLS/5349  (TURNS — looks like HTTPS to firewalls, most resilient)
+        { urls: 'turn:free.expressturn.com:3478?transport=udp',
+          username: TURN_USER, credential: TURN_PASS },
+        { urls: 'turn:free.expressturn.com:3478?transport=tcp',
+          username: TURN_USER, credential: TURN_PASS },
+        { urls: 'turns:free.expressturn.com:5349?transport=tcp',
+          username: TURN_USER, credential: TURN_PASS },
       ],
     },
-    debug: 1, // basic console logging — keeps "level 0" peer errors visible
+    debug: 2, // 0=disable, 1=errors, 2=errors+warnings, 3=all
   };
+  if (RELAY_ONLY) console.log('[net] RELAY_ONLY mode: forcing all WebRTC traffic through TURN');
 
   function mapPeerError(type) {
     switch (type) {
@@ -4529,6 +4541,33 @@
       case 'socket-closed':      return 'signaling connection closed unexpectedly';
       default:                   return type || 'unknown peer error';
     }
+  }
+
+  // Inspects the underlying RTCPeerConnection after a DataConnection opens to
+  // log what kind of ICE candidate was actually selected (host / srflx / relay).
+  // "relay" means TURN was used, "srflx" means STUN-discovered direct path,
+  // "host" means same-LAN direct. Useful for diagnosing strict-NAT issues.
+  async function logIceUsage(conn, label) {
+    try {
+      const pc = conn.peerConnection;
+      if (!pc || !pc.getStats) return;
+      const stats = await pc.getStats();
+      let local, remote;
+      stats.forEach(s => {
+        if (s.type === 'candidate-pair' && s.state === 'succeeded' && s.nominated) {
+          stats.forEach(c => {
+            if (c.id === s.localCandidateId)  local = c;
+            if (c.id === s.remoteCandidateId) remote = c;
+          });
+        }
+      });
+      const lt = local  ? (local.candidateType  || '?') : '?';
+      const rt = remote ? (remote.candidateType || '?') : '?';
+      console.log('[' + label + '] ICE selected: local=' + lt + ' remote=' + rt +
+        (lt === 'relay' || rt === 'relay' ? ' (USING TURN ✓)' : ' (direct path)'));
+      // Surface in HUD too — overwrite a portion of the status line briefly
+      net.iceInfo = (lt === 'relay' || rt === 'relay') ? 'TURN relay' : 'direct (' + lt + '/' + rt + ')';
+    } catch (e) { console.warn('logIceUsage failed', e); }
   }
 
   function netCleanup() {
@@ -4585,6 +4624,7 @@
         net.connected = true;
         net.everConnected = true;
         net.statusText = 'guest connected — waiting for their character';
+        logIceUsage(conn, 'host');
         try {
           conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed });
         } catch (e) {}
@@ -4628,6 +4668,7 @@
         net.connected = true;
         net.everConnected = true;
         net.statusText = 'connected — sending character';
+        logIceUsage(net.conn, 'guest');
         try {
           net.conn.send({ t: 'guestChar', char: netPending.guestChar });
         } catch (e) {}
@@ -7242,7 +7283,7 @@
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 11px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(net.mode === 'host' ? 'HOSTING' : 'GUEST', W - 192, 22);
+    ctx.fillText((net.mode === 'host' ? 'HOSTING' : 'GUEST') + (RELAY_ONLY ? ' [RELAY]' : ''), W - 192, 22);
     ctx.fillStyle = net.connected ? '#a0e0d0' : '#ff8a3a';
     ctx.font = '10px monospace';
     ctx.fillText(net.statusText || (net.connected ? 'connected' : 'connecting...'), W - 192, 36);
@@ -7254,7 +7295,8 @@
       ctx.fillText('waiting for peer...', W - 192, 50);
     } else if (net.connected) {
       ctx.fillStyle = '#888';
-      ctx.fillText(`frame ${net.currentFrame}  delay ${net.inputDelay}`, W - 192, 50);
+      const tail = net.iceInfo ? ` · ${net.iceInfo}` : '';
+      ctx.fillText(`frame ${net.currentFrame}  delay ${net.inputDelay}${tail}`, W - 192, 50);
     }
   }
 
