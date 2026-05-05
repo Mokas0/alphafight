@@ -4485,10 +4485,9 @@
     return s;
   }
 
-  // PeerJS config — pass extra ICE servers so peers can punch through more
-  // NATs. Default PeerJS config has only one Google STUN; on stricter networks
-  // (school WiFi, coffee shops) the connection silently times out without
-  // these. NO TURN by default — truly free public TURN servers are unreliable.
+  // PeerJS config — STUN servers for NAT discovery, plus an ExpressTURN relay
+  // for the strict-NAT/firewall case (school WiFi, etc.) where peers can't
+  // open a direct path. STUN is tried first, TURN is the fallback.
   const PEER_CONFIG = {
     config: {
       iceServers: [
@@ -4497,6 +4496,19 @@
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
         { urls: 'stun:stun.cloudflare.com:3478' },
+        // ExpressTURN relay — used only when a direct STUN-discovered path
+        // can't be established (strict NAT / corporate firewall / school WiFi).
+        // UDP first, then TCP/443 fallback for networks that block UDP.
+        {
+          urls: 'turn:free.expressturn.com:3478',
+          username: '000000002093369940',
+          credential: 'Y/zMMXHaf5XftH1Mg9O5WOlbFfY=',
+        },
+        {
+          urls: 'turn:free.expressturn.com:3478?transport=tcp',
+          username: '000000002093369940',
+          credential: 'Y/zMMXHaf5XftH1Mg9O5WOlbFfY=',
+        },
       ],
     },
     debug: 1, // basic console logging — keeps "level 0" peer errors visible
