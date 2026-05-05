@@ -4485,6 +4485,40 @@
     return s;
   }
 
+  // PeerJS config — pass extra ICE servers so peers can punch through more
+  // NATs. Default PeerJS config has only one Google STUN; on stricter networks
+  // (school WiFi, coffee shops) the connection silently times out without
+  // these. NO TURN by default — truly free public TURN servers are unreliable.
+  const PEER_CONFIG = {
+    config: {
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun.cloudflare.com:3478' },
+      ],
+    },
+    debug: 1, // basic console logging — keeps "level 0" peer errors visible
+  };
+
+  function mapPeerError(type) {
+    switch (type) {
+      case 'peer-unavailable':   return 'host code not found — verify the code or wait for host to fully load';
+      case 'unavailable-id':     return 'this room code is taken — pick HOST again to get a new code';
+      case 'invalid-id':         return 'invalid room code format';
+      case 'network':            return 'network error — check your connection';
+      case 'browser-incompatible': return 'this browser does not support WebRTC';
+      case 'disconnected':       return 'disconnected from signaling server — try restarting';
+      case 'webrtc':             return 'WebRTC connection failed — likely a strict NAT/firewall (TURN required)';
+      case 'ssl-unavailable':    return 'page must be served over HTTPS for WebRTC';
+      case 'server-error':       return 'PeerJS signaling server error — try again in a moment';
+      case 'socket-error':       return 'signaling socket error';
+      case 'socket-closed':      return 'signaling connection closed unexpectedly';
+      default:                   return type || 'unknown peer error';
+    }
+  }
+
   function netCleanup() {
     try { net.conn && net.conn.close(); } catch (e) {}
     try { net.peer && net.peer.destroy(); } catch (e) {}
@@ -4503,24 +4537,42 @@
     netCleanup();
     net.mode = 'host';
     net.localIndex = 0;
-    net.statusText = 'creating room...';
+    net.statusText = 'registering room...';
     net.error = '';
     const code = 'ab-' + generateRoomCode().toLowerCase(); // 'ab-' prefix to namespace
     net.roomCode = code.slice(3).toUpperCase();
     netPending = { hostChar: localChar, guestChar: null, seed: (Math.random() * 0x7fffffff) | 0 };
-    net.peer = new Peer(code);
-    net.peer.on('open', () => { net.statusText = 'waiting for guest...'; });
+    net.peer = new Peer(code, PEER_CONFIG);
+    let openTimeout = setTimeout(() => {
+      if (net.peer && !net.peer.open) {
+        net.statusText = 'signaling slow — still trying...';
+      }
+    }, 6000);
+    net.peer.on('open', () => {
+      clearTimeout(openTimeout);
+      net.statusText = 'waiting for guest to join (' + net.roomCode + ')';
+    });
     net.peer.on('error', e => {
-      net.error = (e && e.type) || 'peer error';
-      net.statusText = 'error: ' + net.error;
+      const msg = mapPeerError(e && e.type);
+      net.error = msg;
+      net.statusText = 'error: ' + msg;
+      console.warn('[host] peer error', e);
+    });
+    net.peer.on('disconnected', () => {
+      net.statusText = 'lost signaling link — reconnecting...';
+      try { net.peer && net.peer.reconnect(); } catch (e) {}
     });
     net.peer.on('connection', conn => {
       net.conn = conn;
+      net.statusText = 'guest joining — handshaking...';
+      const ouTimeout = setTimeout(() => {
+        if (!net.connected) net.statusText = 'WebRTC handshake stuck — likely strict NAT';
+      }, 8000);
       conn.on('open', () => {
+        clearTimeout(ouTimeout);
         net.connected = true;
         net.everConnected = true;
-        net.statusText = 'guest connected, waiting for char select...';
-        // Send our char + seed
+        net.statusText = 'guest connected — waiting for their character';
         try {
           conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed });
         } catch (e) {}
@@ -4530,29 +4582,40 @@
         net.connected = false;
         net.statusText = 'guest disconnected';
       });
+      conn.on('error', e => { console.warn('[host] conn error', e); });
     });
   }
 
-  function startGuest(roomCode, localChar) {
+  function startGuest(roomCode, localChar, retriesLeft) {
     if (typeof Peer === 'undefined') {
       net.error = 'PeerJS not loaded — host the file on a real URL.';
       return;
     }
+    if (retriesLeft === undefined) retriesLeft = 3;
     netCleanup();
     net.mode = 'guest';
     net.localIndex = 1;
-    net.statusText = 'connecting to ' + roomCode + '...';
+    net.statusText = 'creating peer...';
     net.error = '';
     net.roomCode = roomCode;
     netPending = { hostChar: null, guestChar: localChar, seed: null };
-    net.peer = new Peer();
+    net.peer = new Peer(undefined, PEER_CONFIG);
+    let connectTimeout;
     net.peer.on('open', () => {
       const targetId = 'ab-' + roomCode.toLowerCase();
+      net.statusText = 'dialing room ' + roomCode + '...';
       net.conn = net.peer.connect(targetId, { reliable: true });
+      connectTimeout = setTimeout(() => {
+        if (!net.connected) {
+          net.statusText = 'no answer from host — retrying...';
+          if (retriesLeft > 0) startGuest(roomCode, localChar, retriesLeft - 1);
+        }
+      }, 8000);
       net.conn.on('open', () => {
+        clearTimeout(connectTimeout);
         net.connected = true;
         net.everConnected = true;
-        net.statusText = 'connected, sending char...';
+        net.statusText = 'connected — sending character';
         try {
           net.conn.send({ t: 'guestChar', char: netPending.guestChar });
         } catch (e) {}
@@ -4562,10 +4625,25 @@
         net.connected = false;
         net.statusText = 'host disconnected';
       });
+      net.conn.on('error', e => { console.warn('[guest] conn error', e); });
     });
     net.peer.on('error', e => {
-      net.error = (e && e.type) || 'peer error';
-      net.statusText = 'error: ' + net.error;
+      const t = e && e.type;
+      // Auto-retry if host's peer ID is briefly unreachable (host may still be
+      // registering with the signaling server). Up to 3 retries with backoff.
+      if (t === 'peer-unavailable' && retriesLeft > 0) {
+        net.statusText = 'host not ready, retrying in 2s... (' + retriesLeft + ' left)';
+        setTimeout(() => startGuest(roomCode, localChar, retriesLeft - 1), 2000);
+        return;
+      }
+      const msg = mapPeerError(t);
+      net.error = msg;
+      net.statusText = 'error: ' + msg;
+      console.warn('[guest] peer error', e);
+    });
+    net.peer.on('disconnected', () => {
+      net.statusText = 'lost signaling link — reconnecting...';
+      try { net.peer && net.peer.reconnect(); } catch (e) {}
     });
   }
 
