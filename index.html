@@ -4489,6 +4489,24 @@
   // for the strict-NAT/firewall case (school WiFi, etc.) where peers can't
   // open a direct path. STUN is tried first, TURN is the fallback.
   //
+  // ------------------------------------------------------------
+  // Networking
+  // ------------------------------------------------------------
+  // Set RELAY_URL to your deployed Fly.io WebSocket relay to bypass WebRTC
+  // entirely. WebRTC fails on networks that DNS-block STUN/TURN domains
+  // (school networks, corporate proxies, some ISPs). The relay uses plain
+  // WSS — looks identical to HTTPS, gets through everywhere normal web
+  // traffic does. See relay/DEPLOY.md for setup.
+  //
+  // If RELAY_URL is empty, the game falls back to PeerJS+WebRTC (original
+  // behavior). Format: 'wss://your-app.fly.dev' (no trailing slash, wss not
+  // https). You can override at runtime by appending ?relayUrl=wss://... .
+  let RELAY_URL = '';
+  try {
+    const u = new URL(location.href).searchParams.get('relayUrl');
+    if (u) RELAY_URL = u;
+  } catch (e) {}
+
   // DEBUG: append ?relay (or #relay) to the URL to force iceTransportPolicy
   // = 'relay' — every connection is routed through TURN, bypassing STUN
   // entirely. Use this to confirm whether TURN itself is reachable on a
@@ -4673,7 +4691,60 @@
     netPending = null;
   }
 
+  // Returns a PeerJS-DataConnection-shaped object backed by a WebSocket to the
+  // relay. Same .send(obj) / .on('open'|'data'|'close'|'error') / .close() API
+  // so the rest of the netcode is unchanged whether we use WebRTC or the relay.
+  function makeRelayConn(role, code) {
+    const handlers = { open: [], data: [], close: [], error: [] };
+    const emit = (ev, ...a) => (handlers[ev] || []).forEach(h => { try { h(...a); } catch (e) {} });
+    let opened = false, closed = false;
+    let ws;
+    try {
+      ws = new WebSocket(RELAY_URL);
+    } catch (e) {
+      setTimeout(() => emit('error', e), 0);
+      return { send() {}, close() {}, on(ev, fn) { (handlers[ev] = handlers[ev] || []).push(fn); }, _ws: null };
+    }
+    ws.onopen = () => {
+      try { ws.send(JSON.stringify({ t: '__join', code, role })); } catch (e) {}
+    };
+    ws.onmessage = (e) => {
+      let msg = null;
+      try { msg = JSON.parse(typeof e.data === 'string' ? e.data : ''); } catch (err) { return; }
+      if (!msg || typeof msg !== 'object') return;
+      if (typeof msg.t === 'string' && msg.t.startsWith('__')) {
+        if (msg.t === '__joined') {
+          if (msg.peer && !opened) { opened = true; emit('open'); }
+          return;
+        }
+        if (msg.t === '__peer') {
+          if (msg.joined && !opened) { opened = true; emit('open'); }
+          else if (!msg.joined && opened && !closed) { closed = true; emit('close'); }
+          return;
+        }
+        if (msg.t === '__error') {
+          emit('error', new Error('relay: ' + (msg.reason || 'unknown')));
+          return;
+        }
+        return; // unknown control
+      }
+      emit('data', msg);
+    };
+    ws.onerror = (e) => emit('error', e);
+    ws.onclose = () => { if (opened && !closed) { closed = true; emit('close'); } };
+    return {
+      send(obj) {
+        if (!ws || ws.readyState !== 1) return;
+        try { ws.send(JSON.stringify(obj)); } catch (e) {}
+      },
+      close() { try { ws && ws.close(); } catch (e) {} },
+      on(ev, fn) { (handlers[ev] = handlers[ev] || []).push(fn); },
+      _ws: ws,
+    };
+  }
+
   function startHost(localChar) {
+    if (RELAY_URL) return startHostRelay(localChar);
     if (typeof Peer === 'undefined') {
       net.error = 'PeerJS not loaded — host the file on a real URL (Netlify/Pages).';
       return;
@@ -4732,7 +4803,70 @@
     });
   }
 
+  function startHostRelay(localChar) {
+    netCleanup();
+    net.mode = 'host';
+    net.localIndex = 0;
+    net.error = '';
+    net.roomCode = generateRoomCode();
+    net.statusText = 'connecting to relay (' + net.roomCode + ')...';
+    netPending = { hostChar: localChar, guestChar: null, seed: (Math.random() * 0x7fffffff) | 0 };
+    const conn = makeRelayConn('host', net.roomCode);
+    net.conn = conn;
+    let waitTimer = setTimeout(() => {
+      if (!net.connected) net.statusText = 'relay up — waiting for guest (' + net.roomCode + ')';
+    }, 1500);
+    conn.on('open', () => {
+      clearTimeout(waitTimer);
+      net.connected = true;
+      net.everConnected = true;
+      net.statusText = 'guest connected — sending init';
+      try { conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed }); } catch (e) {}
+    });
+    conn.on('data', handleNetMsg);
+    conn.on('close', () => {
+      net.connected = false;
+      net.statusText = 'guest disconnected';
+    });
+    conn.on('error', (e) => {
+      console.warn('[host relay] error', e);
+      const msg = (e && e.message) ? e.message : 'relay error';
+      net.error = msg;
+      net.statusText = 'error: ' + msg;
+    });
+  }
+
+  function startGuestRelay(roomCode, localChar) {
+    netCleanup();
+    net.mode = 'guest';
+    net.localIndex = 1;
+    net.error = '';
+    net.roomCode = roomCode;
+    net.statusText = 'connecting to relay...';
+    netPending = { hostChar: null, guestChar: localChar, seed: null };
+    const conn = makeRelayConn('guest', roomCode);
+    net.conn = conn;
+    conn.on('open', () => {
+      net.connected = true;
+      net.everConnected = true;
+      net.statusText = 'connected — sending character';
+      try { conn.send({ t: 'guestChar', char: netPending.guestChar }); } catch (e) {}
+    });
+    conn.on('data', handleNetMsg);
+    conn.on('close', () => {
+      net.connected = false;
+      net.statusText = 'host disconnected';
+    });
+    conn.on('error', (e) => {
+      console.warn('[guest relay] error', e);
+      const msg = (e && e.message) ? e.message : 'relay error';
+      net.error = msg;
+      net.statusText = 'error: ' + msg;
+    });
+  }
+
   function startGuest(roomCode, localChar, retriesLeft) {
+    if (RELAY_URL) return startGuestRelay(roomCode, localChar);
     if (typeof Peer === 'undefined') {
       net.error = 'PeerJS not loaded — host the file on a real URL.';
       return;
