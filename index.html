@@ -6596,8 +6596,14 @@
     perRow = layout.perRow;
     rowCount = layout.rowCount;
     const rowGap = 16;
+    // Center the grid between the title (~y=120) and footer (~y=480). Cap card
+    // height per row so 2+ rows don't push the bottom row off the canvas.
+    const availTop = 130, availBottom = 470;
+    const availH = availBottom - availTop;
+    const cardHMax = (availH - (rowCount - 1) * rowGap) / rowCount;
+    cardH = Math.min(cardH, Math.max(120, cardHMax));
     const gridH = rowCount * cardH + (rowCount - 1) * rowGap;
-    const cardCY = 200 + gridH / 2;
+    const cardCY = (availTop + availBottom) / 2;
     const cardPositions = [];
     // Pre-compute roster min/max so the stat bars can use (val-min)/(max-min)
     // scaling — this gives MUCH more emphasized variation than the previous
