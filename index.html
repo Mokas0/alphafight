@@ -4559,6 +4559,68 @@
   // log what kind of ICE candidate was actually selected (host / srflx / relay).
   // "relay" means TURN was used, "srflx" means STUN-discovered direct path,
   // "host" means same-LAN direct. Useful for diagnosing strict-NAT issues.
+  // Live ICE candidate-gathering trace. Hooks into the underlying RTCPeerConnection
+  // and logs each candidate as it's discovered, plus state changes. Call this as
+  // soon as the data-conn is created so you can watch the negotiation in real
+  // time even if it never reaches "open".
+  function traceIceGathering(conn, label) {
+    try {
+      // PeerJS lazy-creates pc; poll briefly until it appears.
+      let attempts = 0;
+      const tryAttach = () => {
+        const pc = conn.peerConnection;
+        if (!pc) {
+          if (attempts++ < 50) return setTimeout(tryAttach, 100);
+          console.warn('[' + label + '] no peerConnection after 5s');
+          return;
+        }
+        console.log('[' + label + '] attached to pc; iceServers=', pc.getConfiguration().iceServers);
+        pc.addEventListener('icecandidate', (e) => {
+          if (!e.candidate) { console.log('[' + label + '] ICE gathering complete'); return; }
+          const c = e.candidate;
+          console.log('[' + label + '] candidate: type=' + (c.type || '?') +
+            ' protocol=' + (c.protocol || '?') +
+            ' addr=' + (c.address || c.ip || '?') + ':' + (c.port || '?') +
+            ' rel=' + (c.relatedAddress || '-'));
+        });
+        pc.addEventListener('icecandidateerror', (e) => {
+          console.warn('[' + label + '] ICE error: url=' + e.url +
+            ' code=' + e.errorCode + ' text=' + e.errorText);
+        });
+        pc.addEventListener('iceconnectionstatechange', () => {
+          console.log('[' + label + '] iceConnectionState=' + pc.iceConnectionState);
+        });
+        pc.addEventListener('icegatheringstatechange', () => {
+          console.log('[' + label + '] iceGatheringState=' + pc.iceGatheringState);
+        });
+      };
+      tryAttach();
+    } catch (e) { console.warn('traceIceGathering failed', e); }
+  }
+
+  // Standalone TURN test — call testTurn() from the DevTools console to verify
+  // the configured TURN server actually issues relay candidates with our creds.
+  // Logs each candidate type; if you only see 'host'/'srflx', TURN failed.
+  window.testTurn = async function testTurn() {
+    const cfg = currentPeerConfig().config;
+    console.log('[testTurn] using config:', cfg);
+    const pc = new RTCPeerConnection(cfg);
+    pc.onicecandidate = (e) => {
+      if (!e.candidate) { console.log('[testTurn] DONE'); pc.close(); return; }
+      const c = e.candidate;
+      console.log('[testTurn] candidate: type=' + (c.type || '?') +
+        ' protocol=' + (c.protocol || '?') + ' url=' + (c.url || '-'));
+    };
+    pc.onicecandidateerror = (e) => {
+      console.warn('[testTurn] ERROR url=' + e.url + ' code=' + e.errorCode + ' ' + e.errorText);
+    };
+    pc.createDataChannel('probe');
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    console.log('[testTurn] gathering for 8s...');
+    setTimeout(() => { try { pc.close(); } catch (e) {} }, 8000);
+  };
+
   async function logIceUsage(conn, label) {
     try {
       const pc = conn.peerConnection;
@@ -4628,6 +4690,7 @@
     net.peer.on('connection', conn => {
       net.conn = conn;
       net.statusText = 'guest joining — handshaking...';
+      traceIceGathering(conn, 'host');
       const ouTimeout = setTimeout(() => {
         if (!net.connected) net.statusText = 'WebRTC handshake stuck — likely strict NAT';
       }, 8000);
@@ -4669,6 +4732,7 @@
       const targetId = 'ab-' + roomCode.toLowerCase();
       net.statusText = 'dialing room ' + roomCode + '...';
       net.conn = net.peer.connect(targetId, { reliable: true });
+      traceIceGathering(net.conn, 'guest');
       connectTimeout = setTimeout(() => {
         if (!net.connected) {
           net.statusText = 'no answer from host — retrying...';
