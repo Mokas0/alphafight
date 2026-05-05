@@ -4495,7 +4495,9 @@
   // given network. If the lobby connects in relay mode but not without it,
   // the issue is the direct WebRTC path (NAT). If it doesn't connect even
   // in relay mode, the TURN server / credentials are the problem.
-  const RELAY_ONLY = (typeof location !== 'undefined') &&
+  // Made into a `let` so the in-game `T` toggle can flip it. Detected from the
+  // URL on first load, but the toggle works without reloading.
+  let RELAY_ONLY = (typeof location !== 'undefined') &&
     (/[?&#]relay\b/.test(location.href) || location.hash === '#relay');
   const TURN_USER = '000000002093369940';
   const TURN_PASS = 'Y/zMMXHaf5XftH1Mg9O5WOlbFfY=';
@@ -4524,6 +4526,16 @@
     },
     debug: 2, // 0=disable, 1=errors, 2=errors+warnings, 3=all
   };
+  // Returns a fresh PEER_CONFIG with iceTransportPolicy reflecting the
+  // CURRENT value of RELAY_ONLY (so the in-game T toggle takes effect on the
+  // next peer creation without needing a page reload).
+  function currentPeerConfig() {
+    return Object.assign({}, PEER_CONFIG, {
+      config: Object.assign({}, PEER_CONFIG.config, {
+        iceTransportPolicy: RELAY_ONLY ? 'relay' : 'all',
+      }),
+    });
+  }
   if (RELAY_ONLY) console.log('[net] RELAY_ONLY mode: forcing all WebRTC traffic through TURN');
 
   function mapPeerError(type) {
@@ -4593,7 +4605,7 @@
     const code = 'ab-' + generateRoomCode().toLowerCase(); // 'ab-' prefix to namespace
     net.roomCode = code.slice(3).toUpperCase();
     netPending = { hostChar: localChar, guestChar: null, seed: (Math.random() * 0x7fffffff) | 0 };
-    net.peer = new Peer(code, PEER_CONFIG);
+    net.peer = new Peer(code, currentPeerConfig());
     let openTimeout = setTimeout(() => {
       if (net.peer && !net.peer.open) {
         net.statusText = 'signaling slow — still trying...';
@@ -4651,7 +4663,7 @@
     net.error = '';
     net.roomCode = roomCode;
     netPending = { hostChar: null, guestChar: localChar, seed: null };
-    net.peer = new Peer(undefined, PEER_CONFIG);
+    net.peer = new Peer(undefined, currentPeerConfig());
     let connectTimeout;
     net.peer.on('open', () => {
       const targetId = 'ab-' + roomCode.toLowerCase();
@@ -7329,7 +7341,35 @@
     return true;
   }
 
+  function drawRelayBanner() {
+    if (!RELAY_ONLY) return;
+    // Top-of-screen banner so the user knows relay-only mode is on at every
+    // screen (mode select, code entry, char select, play, over).
+    ctx.save();
+    ctx.fillStyle = '#ff6a2a';
+    ctx.fillRect(0, 0, W, 22);
+    ctx.fillStyle = '#000';
+    ctx.font = 'bold 12px monospace';
+    ctx.textAlign = 'center';
+    ctx.fillText('🛰  RELAY MODE: forcing all WebRTC traffic through TURN  ·  press T to toggle', W/2, 15);
+    ctx.textAlign = 'left';
+    ctx.restore();
+  }
+  let _relayKeyPrev = false;
+  function maybeToggleRelay() {
+    // Allow Tap-T anywhere outside the room-code entry stage to flip the flag.
+    // Uses its own prev-key tracker because menuPrevKeys is only updated by
+    // updateMenu(), not during PLAY state.
+    const held = isHeld('KeyT') && menuStage !== 'code';
+    if (held && !_relayKeyPrev) {
+      RELAY_ONLY = !RELAY_ONLY;
+      console.log('[net] RELAY_ONLY toggled →', RELAY_ONLY);
+    }
+    _relayKeyPrev = held;
+  }
+
   function renderFrame() {
+    maybeToggleRelay();
     if (state === STATE.MENU) {
       drawMenu();
       updateMenu();
@@ -7397,6 +7437,7 @@
       netCleanup();
       net.mode = 'local';
     }
+    drawRelayBanner();
   }
 
   // Fixed-timestep accumulator: pin sim to 60Hz regardless of display refresh
