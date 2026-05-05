@@ -854,10 +854,18 @@
           });
         });
       } else if (dir === 'side') {
-        // Toxic Headbutt (SIDE — was previously neutral) — Green-Missile-style
-        // charging projectile-body. Locks movement during windup, then launches
-        // Rhys horizontally with a body hitbox.
-        this.moveState = { type: 'toxHeadbutt', timer: 38, launched: false, hasHit: null };
+        // Toxic Tendril — vine projectile shoots forward; on contact, grabs
+        // the victim and yanks them toward Rhys, applying poison.
+        this.moveState = { type: 'toxicTendril', timer: 24 };
+        const fwd = this.facing;
+        delaySpawn(4, () => {
+          projectiles.push({
+            owner: this, x: this.cx + fwd * 14, y: this.cy + 4,
+            vx: fwd * 14, vy: 0, w: 14, h: 12,
+            life: 22, damage: 3, kbx: 0, kby: 0,
+            type: 'tendril', gravity: 0,
+          });
+        });
       } else if (dir === 'down') {
         // Spore Trap — sets a stationary trap on the ground below Rhys
         this.moveState = { type: 'sporeTrap', timer: 24 };
@@ -1190,19 +1198,26 @@
           });
         });
       } else if (dir === 'side') {
-        // HTML Dash — costs 20 code, fast directional dash. Each frame the
-        // dash re-reads directional inputs to redirect the velocity vector.
+        // Firewall — costs 20 code. Plants a vertical wall of code that
+        // BLOCKS or REFLECTS enemy projectiles for 4 seconds.
         if (this.code < 20) {
           this.attackCooldown = 8;
           spawnEffect(this.cx + this.facing * 14, this.cy, '#a34040', 14, 12);
           return;
         }
         this.code -= 20;
-        this.moveState = { type: 'htmlDash', timer: 22 };
-        this.invuln = 10;
-        // Initial vector based on directional keys (defaults to facing)
-        this.vx = this.facing * 12;
-        this.vy = 0;
+        this.moveState = { type: 'firewall', timer: 22 };
+        const fwd = this.facing;
+        delaySpawn(5, () => {
+          projectiles.push({
+            owner: this, x: this.cx + fwd * 24 - 5, y: this.cy - 50,
+            vx: 0, vy: 0, w: 10, h: 100,
+            life: 240, damage: 0, kbx: 0, kby: 0,
+            type: 'firewall', gravity: 0, tick: 0,
+          });
+          spawnEffect(this.cx + fwd * 30, this.cy, '#39ff14', 22, 30);
+          spawnEffect(this.cx + fwd * 30, this.cy, '#0d4f1c', 18, 26);
+        });
       } else if (dir === 'down') {
         // Code Farm — channel for 3 seconds; fills code meter to max over the
         // duration. Vulnerable; no super armor.
@@ -1284,20 +1299,28 @@
           });
         });
       } else if (dir === 'side') {
-        // Freeze Glide — fast slide forward, leaving an icy patch behind that
-        // makes anyone standing on it slip.
-        this.moveState = { type: 'iceGlide', timer: 22 };
-        this.vx = this.facing * 12;
-        this.invuln = 6;
+        // Avalanche — points his pole skyward; after a 30-frame telegraph,
+        // a heavy ice block drops from the top blastzone onto the target zone.
+        this.moveState = { type: 'avalanche', timer: 36 };
         const fwd = this.facing;
-        delaySpawn(2, () => {
+        const targetX = this.cx + fwd * 90;
+        // Telegraph marker on the ground so the opponent sees it coming
+        delaySpawn(4, () => {
           projectiles.push({
-            owner: this, x: this.cx - 36, y: GROUND_Y - 4,
-            vx: 0, vy: 0, w: 90, h: 4,
-            life: 240, damage: 0, kbx: 0, kby: 0,
-            type: 'iceFloor', gravity: 0, tick: 0,
+            owner: this, x: targetX - 36, y: GROUND_Y - 4,
+            vx: 0, vy: 0, w: 72, h: 4,
+            life: 30, damage: 0, kbx: 0, kby: 0,
+            type: 'avalancheMarker', gravity: 0, tick: 0,
           });
-          spawnEffect(this.cx + fwd * 30, GROUND_Y - 6, '#ffffff', 18, 30);
+        });
+        // The actual ice chunk falls from the top after the telegraph
+        delaySpawn(30, () => {
+          projectiles.push({
+            owner: this, x: targetX - 14, y: BLAST_TOP + 20,
+            vx: 0, vy: 4, w: 28, h: 28,
+            life: 60, damage: 16, kbx: 0, kby: -7,
+            type: 'iceBlock', gravity: 0.7, spin: 0,
+          });
         });
       } else if (dir === 'up') {
         // Snow Blast — fan of snowflakes upward, multi-hit damage column.
@@ -1352,10 +1375,19 @@
           spawnEffect(this.cx + fwd * 32, this.cy - 8, '#ffffff', 16, 22);
         });
       } else if (dir === 'side') {
-        // Spear Dash — fast forward dash with the pool stick out front.
-        this.moveState = { type: 'spearDash', timer: 22, hasHit: null };
-        this.vx = this.facing * 13;
-        this.invuln = 6;
+        // Eight Ball — drops a black 8-ball that sticks where it lands.
+        // Once the ball is set, any hitbox Colton lands on it kicks the ball
+        // off in the direction of the swing as a heavy projectile.
+        this.moveState = { type: 'eightBallSet', timer: 22 };
+        const fwd = this.facing;
+        delaySpawn(6, () => {
+          projectiles.push({
+            owner: this, x: this.cx + fwd * 18, y: this.cy - 4,
+            vx: fwd * 4, vy: -3, w: 16, h: 16,
+            life: 90, damage: 6, kbx: fwd * 3, kby: -2,
+            type: 'eightBall', gravity: 0.45, spin: 0,
+          });
+        });
       } else if (dir === 'up') {
         // Jump Shot — third jump that thrusts the pool stick upward.
         this.moveState = { type: 'jumpShot', timer: 24, hasHit: null };
@@ -1457,16 +1489,13 @@
             'fireUp',      // Nico up-special (fire propulsion)
             'burnDash',    // Nico side-special (burning dash)
             'katanaUp',    // Derek up-special (katana dash)
-            'toxHeadbutt', // Rhys neutral-special (horizontal launch)
             'megaJump',    // Greyson up-special
             'uppercut',    // Kele up-special
             'glide',       // Jonah up-special (recovery)
             'teleport',    // Theo up-special
             'rocketBoost', // Cole up-special
-            'htmlDash',    // Angus side-special
             'grappleHook', // Angus up-special (recovery)
             'cannonLaunch', // Aidan up-special (recovery)
-            'iceGlide',    // Liam side-special (slide dash)
             'jumpShot',    // Colton up-special (recovery)
             'dropkick',    // Donny side-special (forward leap)
           ]);
@@ -1481,7 +1510,6 @@
             // Big commitment dashes — punishable on whiff
             beetSnatch: 14,    // Jonah — grab whiff is now the punishment
             burnDash: 20,      // Nico — KO tool, should commit you
-            toxHeadbutt: 18,   // Rhys — long horizontal commit
             // Recovery-primary specials — smaller endlag so you can act soon after landing
             katanaUp: 12,
             fireUp: 12,
@@ -1490,12 +1518,9 @@
             uppercut: 10,
             teleport: 10,
             rocketBoost: 14,
-            htmlDash: 16,
             grappleHook: 10,
             cannonLaunch: 10,
-            iceGlide: 12,
             jumpShot: 10,
-            spearDash: 18,
             dropkick: 14,
             powerPunchD: 18,
           };
@@ -1539,7 +1564,7 @@
       else { this.airTime++; this.groundTime = 0; }
       // Capture afterimage silhouette for fast movers — every character gets one,
       // tinted to their identity. Heavy / slow fighters rarely cross the threshold.
-      const dashRx = /burnDash|katanaUp|ultraSpike|toxHeadbutt|megaJump|uppercut|teleport|htmlDash|iceGlide|spearDash/;
+      const dashRx = /burnDash|katanaUp|ultraSpike|megaJump|uppercut|teleport/;
       if (Math.abs(this.vx) > 4 || (this.moveState && dashRx.test(this.moveState.type))) {
         this.afterimages.push({ x: this.x, y: this.y, life: 8 });
         if (this.afterimages.length > 5) this.afterimages.shift();
@@ -1731,26 +1756,10 @@
             }
           }
         }
-        // Rhys: Toxic Headbutt — windup then horizontal launch
-        if (this.moveState && this.moveState.type === 'toxHeadbutt') {
-          const t = this.moveState.timer;
-          // Windup phase: timer 38..28 (lock in place, twitch)
-          if (t > 28) {
-            this.vx = 0;
-            if (this.onGround) this.vy = Math.max(this.vy, 0);
-            if (t % 4 === 0) spawnEffect(this.cx + (Math.random()-0.5)*20, this.cy, '#b6ff6a', 10, 8);
-          } else {
-            // Launch phase: fling Rhys forward
-            if (!this.moveState.launched) {
-              this.moveState.launched = true;
-              this.vx = this.facing * 12;
-              this.vy = -4;
-              spawnEffect(this.cx, this.cy, '#5aaf3a', 20, 30);
-            }
-            // Maintain horizontal speed through light air resistance
-            this.vx *= 0.995;
-            if (Math.random() < 0.8) spawnEffect(this.cx - this.facing * 12, this.cy + (Math.random()-0.5)*20, '#5aaf3a', 16, 12);
-          }
+        // Rhys: Toxic Tendril — small lunge while the vine is in flight.
+        if (this.moveState && this.moveState.type === 'toxicTendril') {
+          if (this.onGround) this.vx = this.facing * 1.5;
+          if (Math.random() < 0.4) spawnEffect(this.cx + this.facing * 14, this.cy, '#5aaf3a', 12, 10);
         }
         // Rhys: Toxic Punch — maintain momentum, poison mist trail
         if (this.moveState && this.moveState.type === 'toxPunch') {
@@ -1794,27 +1803,11 @@
             spawnEffect(this.cx + (Math.random()-0.5)*14, this.cy + 18, '#39ff14', 12, 8);
           }
         }
-        // Angus: HTML Dash — re-read directional inputs each frame to redirect
-        if (this.moveState && this.moveState.type === 'htmlDash') {
-          const ctrl = controls[this.index];
-          let dx = 0, dy = 0;
-          if (frameKeys[ctrl.left]) dx -= 1;
-          if (frameKeys[ctrl.right]) dx += 1;
-          if (frameKeys[ctrl.up]) dy -= 1;
-          if (frameKeys[ctrl.down]) dy += 1;
-          if (dx === 0 && dy === 0) { dx = this.facing; dy = 0; }
-          const mag = Math.hypot(dx, dy) || 1;
-          const speed = 12;
-          this.vx = (dx / mag) * speed;
-          this.vy = (dy / mag) * speed;
-          if (this.vx > 0.5) this.facing = 1;
-          else if (this.vx < -0.5) this.facing = -1;
-          // Code-stream trail
-          if (Math.random() < 0.7) {
-            spawnEffect(this.cx + (Math.random()-0.5)*16, this.cy + (Math.random()-0.5)*30, '#39ff14', 14, 8);
-          }
-          if (Math.random() < 0.4) {
-            spawnEffect(this.cx + (Math.random()-0.5)*24, this.cy + (Math.random()-0.5)*36, '#0d4f1c', 16, 10);
+        // Angus: Firewall — small windup pose (sparkles in front of him)
+        if (this.moveState && this.moveState.type === 'firewall') {
+          if (this.onGround) this.vx *= 0.5;
+          if (Math.random() < 0.6) {
+            spawnEffect(this.cx + this.facing * 24, this.cy + (Math.random()-0.5)*40, '#39ff14', 14, 10);
           }
         }
         // Angus: Code Farm — channel; fills code meter linearly over the duration.
@@ -2155,11 +2148,6 @@
         return { x: this.x - 8, y: this.y - 20, w: this.w + 16, h: this.h + 20,
                  damage: 12, kbx: this.facing * 3, kby: -9, type: 'slash' };
       }
-      // Rhys: Toxic Headbutt — body is a hitbox only during the launch phase
-      if (t === 'toxHeadbutt' && this.moveState.launched) {
-        return { x: this.x - 4, y: this.y + 4, w: this.w + 8, h: this.h - 8,
-                 damage: 7, kbx: this.facing * 5, kby: -5, type: 'poison', poison: true };
-      }
       // Rhys: Toxic Punch — active window, damage + KB scale with snapshot speed
       if (t === 'toxPunch') {
         const elapsed = 24 - this.moveState.timer;
@@ -2259,12 +2247,6 @@
         return { x: this.facing === 1 ? this.x + this.w - 6 : this.x - 56,
                  y: this.y - 4, w: 62, h: this.h * 0.85,
                  damage: 14, kbx: this.facing * 7, kby: -6, type: 'heavy' };
-      }
-      // Colton: Spear Dash — long horizontal hitbox in front during the dash.
-      if (t === 'spearDash') {
-        return { x: this.facing === 1 ? this.x + this.w - 4 : this.x - 64,
-                 y: this.y + 16, w: 64, h: 22,
-                 damage: 12, kbx: this.facing * 7, kby: -3, type: 'pierce' };
       }
       // Colton: Jump Shot — vertical thrust hitbox above
       if (t === 'jumpShot') {
@@ -2775,7 +2757,7 @@
         ctx.fillStyle = '#000';
         ctx.fillRect(bodyX + bodyW * 0.46, bodyY + bodyH * 0.34, bodyW * 0.08, 2);
         // Pool stick (long diagonal). Always visible — Colton always has it.
-        if (!this.moveState || (this.moveState.type !== 'flashSpear' && this.moveState.type !== 'spearDash' && this.moveState.type !== 'jumpShot')) {
+        if (!this.moveState || (this.moveState.type !== 'flashSpear' && this.moveState.type !== 'jumpShot')) {
           const hx = this.cx + fwd * 6;
           const hy = this.cy + 4;
           // Wood shaft
@@ -3245,19 +3227,25 @@
             ctx.stroke();
           }
         }
-        // Rhys: Toxic Headbutt windup crouch + launched body trail
-        if (t === 'toxHeadbutt') {
-          if (this.moveState.timer > 28) {
-            // Windup glow on head
-            ctx.fillStyle = 'rgba(182, 255, 106, 0.5)';
-            ctx.beginPath();
-            ctx.arc(this.cx, this.y + 8, 12 + Math.sin(this.moveState.timer * 0.5) * 3, 0, Math.PI*2);
-            ctx.fill();
-          } else {
-            // Launched: show green streak trail behind
-            ctx.fillStyle = 'rgba(90, 175, 58, 0.5)';
-            ctx.fillRect(this.x - this.facing * 20, this.y + 6, 24, this.h - 12);
-          }
+        // Rhys: Toxic Tendril — draw the vine extending from his hand toward
+        // the projectile tip while it's in flight.
+        if (t === 'toxicTendril') {
+          const proj = projectiles.find(pp => pp.type === 'tendril' && pp.owner === this);
+          const sx = this.cx + this.facing * 6;
+          const sy = this.cy + 4;
+          const ex = proj ? proj.x + proj.w/2 : this.cx + this.facing * (40 + (24 - this.moveState.timer) * 6);
+          const ey = proj ? proj.y + proj.h/2 : this.cy + 4;
+          // Thick green vine
+          ctx.strokeStyle = '#5aaf3a';
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(ex, ey);
+          ctx.stroke();
+          // Inner highlight
+          ctx.strokeStyle = '#b6ff6a';
+          ctx.lineWidth = 2;
+          ctx.stroke();
         }
         // Rhys: Toxic Punch — draw a big punch hitbox with green glow
         if (t === 'toxPunch') {
@@ -4872,7 +4860,8 @@
       const stationary = (p.type === 'smoke' || p.type === 'poisonCloud' || p.type === 'sporeTrap'
                           || p.type === 'gasolinePuddle' || p.type === 'firePatch'
                           || p.type === 'iceFloor' || p.type === 'skiPolePickup'
-                          || p.type === 'flashHit');
+                          || p.type === 'flashHit' || p.type === 'firewall'
+                          || p.type === 'eightBallSet' || p.type === 'avalancheMarker');
       if (!stationary) {
         p.vy += p.gravity || 0;
         p.x += p.vx;
@@ -4916,6 +4905,32 @@
       if (p.type === 'skiPole') p.spin = (p.spin || 0) + 0.45;
       if (p.type === 'snowflake') p.spin = (p.spin || 0) + 0.4;
       if (p.type === 'poolBall') p.spin = (p.spin || 0) + 0.25;
+      if (p.type === 'eightBall') p.spin = (p.spin || 0) + 0.3;
+      if (p.type === 'iceBlock') p.spin = (p.spin || 0) + 0.05;
+      // Firewall reflect — Angus's wall flips the velocity of any non-friendly,
+      // non-firewall, non-stationary-area projectile that crosses it. Damage,
+      // owner, etc. stay intact so the reflected shot can hit the original
+      // attacker.
+      if (p.type !== 'firewall' && p.type !== 'firePatch' && p.type !== 'gasolinePuddle'
+          && p.type !== 'poisonCloud' && p.type !== 'iceFloor' && p.type !== 'skiPolePickup'
+          && p.type !== 'flashHit' && p.type !== 'eightBallSet' && p.type !== 'avalancheMarker'
+          && !p.reflected) {
+        for (const w of projectiles) {
+          if (w.type !== 'firewall') continue;
+          if (w.owner === p.owner) continue; // your own wall doesn't block your shots
+          // AABB overlap
+          if (p.x + p.w > w.x && p.x < w.x + w.w &&
+              p.y + p.h > w.y && p.y < w.y + w.h) {
+            p.vx = -p.vx;
+            p.owner = w.owner; // reflected — now belongs to Angus
+            p.reflected = true; // don't double-bounce on the same wall
+            spawnEffect(w.x + w.w/2, p.y + p.h/2, '#39ff14', 18, 22);
+            spawnEffect(w.x + w.w/2, p.y + p.h/2, '#ffffff', 12, 16);
+            break;
+          }
+        }
+      }
+
       // Angus grapple — when the hook reaches end-of-life without catching
       // anyone, yank Angus toward the hook's last position (recovery boost).
       // Triggers on any despawn (life==1 from natural expiry, or life<=0 if
@@ -4973,6 +4988,15 @@
           });
           spawnEffect(p.x + p.w/2, GROUND_Y, '#5aaf3a', 20, 28);
           p.life = 0;
+        } else if (p.type === 'eightBall') {
+          // Lands and sticks where it falls until Colton's hitbox kicks it.
+          p.type = 'eightBallSet';
+          p.vx = 0; p.vy = 0;
+          p.life = 480;
+          p.y = GROUND_Y - p.h;
+          p.tick = 0;
+          spawnEffect(p.x + p.w/2, GROUND_Y, '#000', 14, 22);
+          spawnEffect(p.x + p.w/2, GROUND_Y, '#ffe14a', 10, 18);
         } else if (p.type === 'gasolineSpray') {
           // Spread on impact into a stationary puddle
           projectiles.push({
@@ -5034,6 +5058,18 @@
             p.bounces = (p.bounces || 0) + 1;
             spawnEffect(p.x + p.w/2, p.y + p.h, '#ffeb3b', 10, 16);
           }
+        } else if (p.type === 'iceBlock') {
+          // Avalanche chunk shatters on the floor with a small AoE.
+          p.life = 0;
+          spawnEffect(p.x + p.w/2, GROUND_Y, '#ffffff', 28, 44);
+          spawnEffect(p.x + p.w/2, GROUND_Y, '#88ddff', 24, 50);
+          for (const f of fighters) {
+            if (f.respawnTimer > 0 || f.invuln > 0) continue;
+            const dx = f.cx - (p.x + p.w/2);
+            if (Math.abs(dx) < 40 && Math.abs(f.cy - GROUND_Y) < 80) {
+              f.takeDamage(6, Math.sign(dx) * 4, -3, p.owner);
+            }
+          }
         } else if (p.type === 'snowflake') {
           // Snowflakes melt on the ground.
           p.life = 0;
@@ -5074,8 +5110,10 @@
         } else if (p.type === 'poisonCloud' || p.type === 'firePatch' || p.type === 'gasolinePuddle' || p.type === 'skiPolePickup') {
           // Area effects + Liam's dropped pole can affect the owner too
           // (the pole IS the pickup, only Liam should grab it).
-        } else if (p.type === 'iceFloor') {
-          // Skip damage — friction effect handled separately in fighter update.
+        } else if (p.type === 'iceFloor' || p.type === 'eightBallSet'
+                || p.type === 'firewall' || p.type === 'avalancheMarker') {
+          // Stationary props that don't damage on contact — fighters can pass
+          // through (or stand on, in the case of the ball/wall).
           continue;
         } else if (f === p.owner) continue;
         if (f.respawnTimer > 0 || f.invuln > 0) continue;
@@ -5215,6 +5253,33 @@
             }
             // Other fighters / Liam without owner-match pass through
             continue;
+          } else if (p.type === 'eightBall') {
+            // Heavy moving 8-ball — counter-able.
+            if (f.counterActive > 0) {
+              p.owner.takeDamage(p.damage * 1.5, -p.vx * 1.5, -5, f);
+              spawnEffect(f.cx, f.cy, '#ffffff', 22, 38);
+              f.counterActive = 0; f.counterCooldown = 60;
+              p.life = 0;
+              break;
+            }
+            f.takeDamage(p.damage, p.kbx, p.kby, p.owner);
+            spawnEffect(f.cx, f.cy, '#000', 22, 36);
+            spawnEffect(f.cx, f.cy, '#ffe14a', 18, 30);
+            p.life = 0;
+            break;
+          } else if (p.type === 'iceBlock') {
+            if (f.counterActive > 0) {
+              p.owner.takeDamage(p.damage * 1.5, 0, -5, f);
+              spawnEffect(f.cx, f.cy, '#ffffff', 22, 40);
+              f.counterActive = 0; f.counterCooldown = 60;
+              p.life = 0;
+              break;
+            }
+            f.takeDamage(p.damage, p.kbx, p.kby, p.owner);
+            spawnEffect(f.cx, f.cy, '#88ddff', 26, 38);
+            spawnEffect(f.cx, f.cy, '#ffffff', 18, 26);
+            p.life = 0;
+            break;
           } else if (p.type === 'snowflake') {
             f.takeDamage(p.damage, p.kbx, p.kby, p.owner);
             spawnEffect(f.cx, f.cy, '#ffffff', 18, 22);
@@ -5264,6 +5329,26 @@
             f.vy = (dy / dist) * 14;
             spawnEffect(f.cx, f.cy, '#39ff14', 22, 26);
             spawnEffect((f.cx + ax) / 2, (f.cy + ay) / 2, '#39ff14', 18, 16);
+            p.life = 0;
+            break;
+          } else if (p.type === 'tendril') {
+            // Toxic Tendril — yank the victim toward Rhys + poison them.
+            if (f.counterActive > 0) {
+              p.owner.takeDamage(p.damage * 1.5, -p.vx * 1.5, -4, f);
+              spawnEffect(f.cx, f.cy, '#ffffff', 20, 36);
+              f.counterActive = 0; f.counterCooldown = 60;
+              p.life = 0;
+              break;
+            }
+            f.takeDamage(p.damage, 0, -2, p.owner);
+            f.applyPoison(180);
+            const rx = p.owner.cx, ry = p.owner.cy;
+            const dx2 = rx - f.cx, dy2 = ry - f.cy;
+            const dist2 = Math.hypot(dx2, dy2) || 1;
+            f.vx = (dx2 / dist2) * 11;
+            f.vy = (dy2 / dist2) * 11;
+            spawnEffect(f.cx, f.cy, '#5aaf3a', 22, 28);
+            spawnEffect((f.cx + rx) / 2, (f.cy + ry) / 2, '#b6ff6a', 18, 18);
             p.life = 0;
             break;
           } else if (p.type === 'igniter') {
@@ -5409,6 +5494,28 @@
       const hb = atk.getHitbox();
       if (!hb) continue;
 
+      // Colton kicking his own set 8-ball: turns the ball into a high-damage
+      // flying projectile in the direction of the swing.
+      if (atk.key === 'colton') {
+        for (const ball of projectiles) {
+          if (ball.type !== 'eightBallSet') continue;
+          if (ball.owner !== atk) continue;
+          if (!(hb.x < ball.x + ball.w && hb.x + hb.w > ball.x &&
+                hb.y < ball.y + ball.h && hb.y + hb.h > ball.y)) continue;
+          // Convert the set ball into a fast moving projectile
+          ball.type = 'eightBall';
+          ball.vx = atk.facing * 14;
+          ball.vy = -3;
+          ball.life = 80;
+          ball.damage = 20;
+          ball.kbx = atk.facing * 9;
+          ball.kby = -6;
+          ball.tick = 0;
+          spawnEffect(ball.x + ball.w/2, ball.y + ball.h/2, '#ffe14a', 22, 30);
+          spawnEffect(ball.x + ball.w/2, ball.y + ball.h/2, '#ffffff', 16, 24);
+        }
+      }
+
       // GRABS (cmdGrab + suplex): shield-piercing, doesn't damage directly
       if (hb.grab) {
         for (const def of fighters) {
@@ -5493,7 +5600,7 @@
           if (atk.moveState && atk.moveState.type && atk.moveState.type.startsWith('atk_')) {
             atk.moveState.hasHit = atk.moveState.hasHit || new Set();
             atk.moveState.hasHit.add(def);
-          } else if (atk.moveState && ['toxHeadbutt','toxPunch','hardPunch','powerPunch','uppercut','bodySlam','ultraSpike','powerBlast','hammerBonk','spearDash','jumpShot','powerPunchD','dropkick','ultUpper'].includes(atk.moveState.type)) {
+          } else if (atk.moveState && ['toxPunch','hardPunch','powerPunch','uppercut','bodySlam','ultraSpike','powerBlast','hammerBonk','jumpShot','powerPunchD','dropkick','ultUpper'].includes(atk.moveState.type)) { /* unchanged */
             atk.moveState.hasHit = atk.moveState.hasHit || new Set();
             atk.moveState.hasHit.add(def);
           } else {
@@ -5835,6 +5942,107 @@
         if (p.life < 60) {
           ctx.fillStyle = `rgba(0, 0, 0, ${0.3 - p.life / 200})`;
           ctx.fillRect(p.x, p.y, p.w, p.h);
+        }
+      } else if (p.type === 'tendril') {
+        // Animated green vine — drawn as a thick green stroke. The tail/start
+        // is rendered by Liam's per-character special block; this just shows
+        // the projectile head as a small bulb.
+        ctx.fillStyle = '#5aaf3a';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#b6ff6a';
+        ctx.fillRect(p.x + 2, p.y + 2, p.w - 4, p.h - 4);
+      } else if (p.type === 'firewall') {
+        // Vertical wall of green code with scrolling symbols
+        const cx = p.x + p.w/2;
+        ctx.fillStyle = `rgba(57, 255, 20, ${0.20 + Math.sin(p.tick * 0.18) * 0.07})`;
+        ctx.fillRect(p.x - 3, p.y, p.w + 6, p.h);
+        ctx.fillStyle = '#0d4f1c';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#39ff14';
+        ctx.fillRect(p.x + 2, p.y, p.w - 4, p.h);
+        // Scrolling code symbols up the wall
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 7px monospace';
+        ctx.textAlign = 'center';
+        const symbols = ['{', '}', '<', '>', '/', '0', '1'];
+        const rows = Math.floor(p.h / 9);
+        for (let k = 0; k < rows; k++) {
+          const sy = p.y + 7 + k * 9 - ((p.tick * 0.5) % 9);
+          if (sy > p.y && sy < p.y + p.h) {
+            ctx.fillText(symbols[(k + (p.tick / 6 | 0)) % symbols.length], cx, sy);
+          }
+        }
+        ctx.textAlign = 'left';
+        // Fade-out when life is short
+        if (p.life < 60) {
+          ctx.fillStyle = `rgba(0, 0, 0, ${0.4 - p.life / 200})`;
+          ctx.fillRect(p.x, p.y, p.w, p.h);
+        }
+      } else if (p.type === 'avalancheMarker') {
+        // Telegraph: red flashing zone on the ground where the ice will land
+        const flash = (p.tick % 6) < 3 ? '#ff4444' : '#ffeb3b';
+        ctx.strokeStyle = flash;
+        ctx.lineWidth = 2;
+        ctx.setLineDash([6, 4]);
+        ctx.strokeRect(p.x, p.y - 2, p.w, p.h + 4);
+        ctx.setLineDash([]);
+        ctx.fillStyle = `rgba(255, 80, 80, ${0.2 + Math.sin(p.tick * 0.3) * 0.1})`;
+        ctx.fillRect(p.x, p.y - 2, p.w, p.h + 4);
+        // Down-arrow indicator
+        const ax = p.x + p.w/2, ay = p.y - 14;
+        ctx.fillStyle = flash;
+        ctx.beginPath();
+        ctx.moveTo(ax - 6, ay);
+        ctx.lineTo(ax + 6, ay);
+        ctx.lineTo(ax, ay + 8);
+        ctx.closePath();
+        ctx.fill();
+      } else if (p.type === 'iceBlock') {
+        // Falling ice chunk — chunky white-blue block with cracks
+        ctx.fillStyle = '#5ab0e0';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#88ddff';
+        ctx.fillRect(p.x + 2, p.y + 2, p.w - 4, p.h - 4);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(p.x + 4, p.y + 4, 8, 4);
+        ctx.fillRect(p.x + p.w - 12, p.y + 6, 4, 8);
+        // Falling streaks above
+        ctx.strokeStyle = 'rgba(136, 221, 255, 0.5)';
+        ctx.lineWidth = 1.5;
+        for (let k = 0; k < 3; k++) {
+          ctx.beginPath();
+          ctx.moveTo(p.x + 6 + k * 8, p.y - 14);
+          ctx.lineTo(p.x + 6 + k * 8, p.y - 4);
+          ctx.stroke();
+        }
+      } else if (p.type === 'eightBall' || p.type === 'eightBallSet') {
+        // Black 8-ball with a white circle and the number 8
+        const cx = p.x + p.w/2, cy = p.y + p.h/2;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(p.spin || 0);
+        ctx.fillStyle = '#000';
+        ctx.beginPath(); ctx.arc(0, 0, p.w/2, 0, Math.PI*2); ctx.fill();
+        // Shine highlight
+        ctx.fillStyle = 'rgba(255,255,255,0.25)';
+        ctx.beginPath(); ctx.arc(-2, -2, p.w/4, 0, Math.PI*2); ctx.fill();
+        // Center white disc with "8"
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(0, 0, p.w/3.5, 0, Math.PI*2); ctx.fill();
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 9px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText('8', 0, 3);
+        ctx.textAlign = 'left';
+        ctx.restore();
+        // Glow ring for the SET ball so Colton sees it's hittable
+        if (p.type === 'eightBallSet') {
+          const pulse = 0.4 + Math.sin(p.tick * 0.15) * 0.2;
+          ctx.strokeStyle = `rgba(255, 225, 74, ${pulse})`;
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(cx, cy, p.w/2 + 4, 0, Math.PI*2);
+          ctx.stroke();
         }
       } else if (p.type === 'snowflake') {
         // 6-armed snowflake
@@ -6471,16 +6679,16 @@
       const rows = [
         { key: 'nico',    moves: ['Fireball (bouncing)', 'Burning Dash', 'Fire Propulsion', 'Counter'] },
         { key: 'derek',   moves: ['Shuriken', 'Hand Crossbow', 'Katana Dash', 'Smoke Bomb'] },
-        { key: 'rhys',    moves: ['Toxic Punch', 'Toxic Headbutt', 'Poison Lob', 'Spore Trap'] },
+        { key: 'rhys',    moves: ['Toxic Punch', 'Toxic Tendril (yank+poison)', 'Poison Lob', 'Spore Trap'] },
         { key: 'greyson', moves: ['Grenade', 'Hard Punch', 'Mega Jump', 'Cmd Grab (pierces shield)'] },
         { key: 'kele',    moves: ['Power Punch', 'Suplex', 'Uppercut', 'Body Slam'] },
         { key: 'jonah',   moves: ['Beet Blast', 'Beet Snatch (mash atk)', 'Glide', 'Ultra Spike'] },
         { key: 'theo',    moves: ['Charge Orb (projectile)', 'Power Blast', 'Teleport', 'Absorb'] },
         { key: 'cole',    moves: ['Igniter Toss', 'Gasoline (fuel cost)', 'Rocket Boost', 'Molotov'] },
-        { key: 'angus',   moves: ['Code Disrupter', 'HTML Dash', 'Grappling Hook', 'Code Farm'] },
+        { key: 'angus',   moves: ['Code Disrupter', 'Firewall (reflects)', 'Grappling Hook', 'Code Farm'] },
         { key: 'aidan',   moves: ['Loot Box (random fx)', 'Hammer Bonk', 'Cannon Launch', 'Cheese Throw'] },
-        { key: 'liam',    moves: ['Ski Pole Throw', 'Freeze Glide', 'Snow Blast', 'Ice Parry'] },
-        { key: 'colton',  moves: ['Pool Ball (1s windup)', 'Spear Dash', 'Jump Shot', 'Flashing Mach Spear'] },
+        { key: 'liam',    moves: ['Ski Pole Throw', 'Avalanche (telegraphed)', 'Snow Blast', 'Ice Parry'] },
+        { key: 'colton',  moves: ['Pool Ball (0.5s windup)', 'Eight Ball (set + kick)', 'Jump Shot', 'Flashing Mach Spear'] },
         { key: 'donny',   moves: ['Power Punch (windup)', 'Power Dropkick', 'Power Grab (fling up)', 'Ultimate Upper'] },
       ];
       const rowH = 26;
