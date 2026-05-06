@@ -7,8 +7,8 @@ Drop `index.html` into any browser or static host and play.
 ## Status
 
 Playable prototype. Local 2-player (shared keyboard) **and** online 2-player over WebRTC,
-with ten characters, full move sets, camera tracking, ledge recoveries, and stock-based
-matches.
+with thirteen characters, full move sets, camera tracking, ledge recoveries with auto-drop,
+shield-break mechanic, and stock-based matches.
 
 ## Online play
 
@@ -25,8 +25,8 @@ on your end), with deterministic lockstep netcode and a 3-frame input delay buff
 - **ESC** in any state returns to the main menu and tears down the connection.
 
 Online play needs the page hosted on a real URL (Netlify Drop / GitHub Pages) — the
-PeerJS CDN won't load reliably from `file://`. NAT traversal usually succeeds for ~80% of
-home networks; a TURN relay would be needed for the rest (out of scope).
+PeerJS CDN won't load reliably from `file://`. NAT traversal usually succeeds on home
+networks; very strict NATs (school/corporate) may fail to connect.
 
 The match status overlay in the top-right shows connection state, current frame, and
 desync warnings. State hashes are exchanged every 60 frames; if they diverge, the overlay
@@ -62,8 +62,9 @@ down air — down air is a spike).
 
 ## Roster
 
-Ten characters with distinct archetypes. All have four directional specials, ground tilts
-(jab/forward/up/down) and full aerials. Stats below are relative.
+Thirteen characters with distinct archetypes. All have four directional specials, ground
+tilts (jab/forward/up/down) and full aerials. The character-select screen is a centered
+multi-row grid with min-max-normalized stat bars. Stats below are relative.
 
 ### Nico — Rushdown (orange/yellow)
 Fast close-range pressure with fire.
@@ -75,14 +76,14 @@ Fast close-range pressure with fire.
 ### Derek — Zoner (blue/purple)
 Keep-away ninja with ranged tools.
 - **Neutral**: Shuriken (fast straight projectile)
-- **Side**: Hand Crossbow (piercing bolt)
+- **Side**: Hand Crossbow (piercing bolt, very low damage — pure spacing tool)
 - **Up**: Katana Upward Dash (12 dmg vertical)
 - **Down**: Smoke Bomb (lingering AoE)
 
 ### Rhys — Trapper (green)
 Low base damage, but specials inflict 1.5s poison DoT (1.5%/15 frames).
 - **Neutral**: Toxic Punch (heaviest punch, KB scales with current speed)
-- **Side**: Toxic Headbutt (Green-Missile-style horizontal launch)
+- **Side**: Toxic Tendril (vine projectile yanks the victim toward Rhys + applies poison)
 - **Up**: Poison Lob (bomb arcs up, lands as a poison cloud)
 - **Down**: Spore Trap (stationary armed trap, lasts 6s)
 
@@ -105,68 +106,98 @@ Slowest walk, heaviest weight, no ranged tools. All-melee bruiser.
 ### Jonah — Flier (pink/teal)
 Lightest weight, 5 air jumps, floaty gravity.
 - **Neutral**: Beet Blast (5-pellet shotgun spread, very short range)
-- **Side**: Mach 5 (long no-damage dash with invuln)
+- **Side**: Beet Snatch (close-range command grab — pierces shields. On grab, Jonah holds
+  the victim and the attack button can be mashed for repeated damage over up to 2 seconds.)
 - **Up**: Glide (60 frames of near-zero fall speed)
 - **Down**: Ultra Spike (vertical plunge, bounces off surfaces)
 
 ### Theo — Controller (purple/cyan)
 Medium stats, battlefield-control specialist with dark-energy tools.
-- **Neutral**: Charge Orb (hold special to charge — release to **fire a flying orb projectile** that detonates on impact for 7→25 dmg, 55→120 radius based on charge held)
-- **Side**: Power Blast (energy rifle shot — laser projectile + close-range bayonet thrust; both connect at point-blank)
+- **Neutral**: Charge Orb (hold special to charge — release to fire a flying orb projectile that detonates on impact for 7→25 dmg, 55→120 radius based on charge held)
+- **Side**: Power Blast (energy rifle shot — laser projectile + close-range bayonet thrust)
 - **Up**: Teleport (vanishes briefly, reappears 200px in the directional key pressed; helpless after if airborne)
 - **Down**: Absorb (consumes incoming projectiles within 80px and converts their damage into healing at 1.2×)
 
 ### Cole — Pyromaniac (coal-black/orange)
 Medium stats with a **fuel meter** (0–100, regenerates ~0.4/frame on the ground, ~0.2/frame airborne)
 that gates his rocket boost and gasoline spray. Gas + ignite is the combo identity.
-- **Neutral**: Igniter Toss (lobs a small sparking device forward in an arc, 7 dmg on direct hit. On impact — ground or enemy — the device sparks: it lights any gasoline puddle within 80 px into a fire patch and detonates **any** fueled enemy in the splash for +14 bonus damage. Direct hits on a fueled target also get the bonus.)
-- **Side**: Gasoline Spray (costs 25 fuel; lobbed oil arc — direct hit douses an enemy with the *fueled* status; misses land as a 360-frame puddle that douses anyone who walks through it)
-- **Up**: Rocket Boost (hold special to thrust upward, drains 0.34 fuel/frame ≈ 5s at full tank; steerable left/right, 14f endlag on landing, helpless if airborne when fuel runs dry)
-- **Down**: Molotov (lobbed bottle, 8 dmg direct; on impact spawns a 100-frame fire patch that ticks 1.4 dmg every 12f. Direct hits also apply *fueled*.)
-- **Fueled** status (4s) is shared across the kit — anything that ignites it (Ignite hitbox or Fire Patch tick) deals bonus damage and clears the status.
+- **Neutral**: Igniter Toss (lobs a small sparking device, 7 dmg direct; on impact, lights any nearby gas puddle and detonates fueled enemies for +14)
+- **Side**: Gasoline Spray (costs 25 fuel; arc spray douses enemies with *fueled* status, leaves a 360-frame puddle)
+- **Up**: Rocket Boost (hold special to thrust upward, drains 0.34 fuel/frame; helpless if airborne when fuel runs dry)
+- **Down**: Molotov (lobbed bottle, 8 dmg direct + 100-frame fire patch ticking 1.4 dmg/12f. Direct hits apply *fueled*.)
+- **Fueled** status (4s) — anything that ignites it deals bonus damage and clears it.
 
 ### Angus — Hacker (dark green / matrix green)
 Computer nerd. Has a **code meter** (0–100) that **charges by taking damage** (2 code per
-damage point). Drives platforms and dashes; reset on death.
+damage point). Drives platforms, walls, and recoveries; reset on death.
 - **Neutral**: Code Disrupter (costs 25 code; spawns a 110×8 px temporary platform in front of Angus that lasts ~5 seconds — anyone can stand on it)
-- **Side**: HTML Dash (costs 20 code; fast 12-speed dash that **re-reads directional inputs every frame** and curves to match — change direction mid-dash by holding new keys, brief invuln)
-- **Up**: Grappling Hook (lobbed hook — direct hit on a fighter **yanks them toward Angus**; miss/expiry pulls **Angus toward the hook tip** as a recovery boost)
+- **Side**: Firewall (costs 20 code; plants a vertical wall of code that **reflects projectiles** back at the attacker)
+- **Up**: Grappling Hook (lobbed hook — direct hit on a fighter yanks them toward Angus; miss/expiry pulls Angus toward the hook tip as a recovery boost)
 - **Down**: Code Farm (channels for 3 seconds and fills the code meter to max — vulnerable, no super armor)
 
 ### Aidan — Jester (purple/gold)
 Jokester with a chaos kit — random effects, hammers, and lobbed cheese.
-- **Neutral**: Loot Box (lobbed crate; on direct hit applies one of: Poisoned 3s · Doused (fueled) 4s · Slowed 40f hitstun · Bonus 10 dmg · Aidan heals 12%)
+- **Neutral**: Loot Box (lobbed crate; random effect on direct hit: Poisoned 3s · Fueled 4s · Slowed 40f · +10 dmg · Aidan heals 12%)
 - **Side**: Hammer Bonk (heavy overhead swing, 14 dmg + strong KB)
-- **Up**: Cannon Launch (fast upward burst, vy = -17, brief invuln, helpless after if airborne)
-- **Down**: Cheese Throw (lobbed yellow wedge that arcs and falls, 9 dmg on contact)
+- **Up**: Cannon Launch (fast upward burst, brief invuln, helpless after if airborne)
+- **Down**: Cheese Throw (lobbed yellow wedge that arcs and falls, 9 dmg)
+
+### Liam — Ice (cyan/white)
+Wields a ski pole — drops it after Ski Pole Throw and loses access to Ice Parry until he picks it back up.
+- **Neutral**: Ski Pole Throw (heavy projectile — single-shot until retrieved)
+- **Side**: Avalanche (points pole skyward; after a 30-frame telegraph, ice shards fall in a column ahead of him)
+- **Up**: Snow Blast (multi-hit upward fan of snowflakes, also functions as a recovery)
+- **Down**: Ice Parry (counter — only usable while holding the pole; reflects the next melee hit)
+
+### Colton — Billiards (felt-green / wood)
+Pool-hall trickster with a stick and balls. Mid-range zoner.
+- **Neutral**: Pool Ball Throw (30-frame / 0.5s windup, then a heavy striped ball at low arc)
+- **Side**: Eight Ball (drops a sticky black 8-ball that stays where it lands — re-press special to launch it forward as a heavy projectile)
+- **Up**: Jump Shot (third jump using the cue as a pole-vault, vertical hitbox above)
+- **Down**: Flashing Mach Spear (5 rapid invisible spear pulses around him, then one big visible thrust)
+
+### Donny — Boxer (brown/gold)
+Professional boxer. Heavier hitter on regular punches; specials are all melee with no
+projectiles. No-frills all-physical kit.
+- **Neutral**: Power Punch (30-frame / 0.5s windup, brutal high-damage straight)
+- **Side**: Power Dropkick (fast horizontal leap with a body hitbox in front)
+- **Up**: Power Grab (short-range grab that pierces shields and flings the victim straight up)
+- **Down**: Ultimate Upper (wide-arc rising uppercut — low damage but huge vertical KB)
 
 ## Core mechanics
 
 - **Stock match** — first to knock the other off 3 times wins.
 - **Damage percent** — SSB-style. Higher % = more knockback. No cap.
 - **Weight** — multiplier on knockback received (Jonah 0.75 lightest, Kele 1.35 heaviest).
-- **Block** — shield reduces damage and KB by 70%, drains nothing.
-- **Counter** — Nico's down-special reflects attacks at 1.5×. Beats grabs.
-- **Grabs** — Greyson's Cmd Grab and Kele's Suplex pierce shields. Counter beats them.
+- **Block / shield** — shield reduces damage and KB by 70%, **drains while held** (faster
+  the bigger the hit absorbed). When the meter hits 0 the shield **breaks** and the fighter
+  is stunned wide-open. Shield regenerates while not blocking.
+- **Counter** — Nico's down-special and Liam's Ice Parry reflect attacks at 1.5×. Beats grabs.
+- **Grabs** — Greyson's Cmd Grab, Kele's Suplex, Jonah's Beet Snatch, and Donny's Power Grab
+  all pierce shields. Counter beats them.
 - **Free-fall (helpless)** — propulsion specials lock you out of further actions until
   you land or get hit. Affects: Fire Propulsion, Burning Dash, Katana Dash, Toxic Headbutt,
-  Mega Jump, Uppercut, Glide, Teleport. Drift-only horizontal control during helpless.
-- **End lag** — dash moves apply input-locking recovery frames on landing:
-  Mach 5 (22f), Burning Dash (20f), Toxic Headbutt (18f), Katana/Fire Propulsion/Mega Jump
-  (12f), Glide/Uppercut/Teleport (10f). Getting hit clears endlag.
+  Mega Jump, Uppercut, Glide, Teleport, Snow Blast, Jump Shot, Power Dropkick, Cannon Launch,
+  Rocket Boost (when fuel empties airborne). Drift-only horizontal control during helpless.
+- **End lag** — propulsion / dash moves apply input-locking recovery frames on landing.
+  Getting hit clears endlag.
 - **Poison DoT** — Rhys-only status. 1.5s, ticks 1.5% per 15 frames, no KB. Re-poisoning
   refreshes (doesn't stack). Clears on death.
-- **Ledge grab** — auto-grab when falling near either stage corner. 40 frames invuln.
-  Press up/away to climb up, down/toward to drop.
+- **Ledge grab** — auto-grab when falling near either stage corner. 40 frames of invuln,
+  then **auto-drops after 5 seconds** (no ledge-stalling). Press up/away to climb up,
+  down/toward to drop manually.
 - **Camera** — tracks midpoint of both fighters with dynamic zoom (0.5×–1.1×).
-- **Off-screen indicators** — color-coded arrows around viewport edge point to
-  off-screen fighters. Red `!` warns at 500+ world-pixels distance.
+- **Off-screen indicators** — color-coded arrows around viewport edge point to off-screen
+  fighters. Red `!` warns at 500+ world-pixels distance.
 - **Blastzones** — explicit world-coordinate boundaries well outside the visible viewport.
   Crossing kills.
+- **Fixed-timestep sim** — game logic is pinned to 60 Hz regardless of monitor refresh rate
+  (60/120/144/240 Hz monitors all play at the same speed). Render runs once per vsync;
+  the sim catches up via 1–5 ticks per render frame.
 
 ## Architecture
 
-Single self-contained `index.html` file (~2500 lines) with three top-level sections:
+Single self-contained `index.html` file (~7400 lines) with three top-level sections:
 
 1. **HTML/CSS** — minimal page chrome, control legend, single 960×540 canvas.
 2. **JavaScript IIFE** — entire game in one closure. Everything is closure-local
@@ -180,10 +211,14 @@ Single self-contained `index.html` file (~2500 lines) with three top-level secti
    - Standalone projectile system (`projectiles[]`, `updateProjectiles`,
      `explodeGrenade`)
    - Standalone melee resolver (`resolveMelee`)
+   - PeerJS-based netcode: lockstep sim with seeded RNG (mulberry32),
+     `delaySpawn` frame-counter, snapshot/restore for stalls.
    - Render functions (`drawBackdrop`, `drawStage`, `drawProjectiles`, `drawEffects`,
      `drawHUD`, `drawOffstageIndicators`, `drawMenu`, `drawGameOver`)
-   - Main loop (`loop`) — switches on `state` (MENU / PLAY / OVER)
-3. **No external dependencies** — no Tailwind, no React, no libs. Pure Canvas2D.
+   - Main loop (`loop` → `stepSim` + `renderFrame`) — switches on `state`
+     (MENU / PLAY / OVER), fixed-timestep accumulator at 60 Hz.
+3. **External dependency** — PeerJS 1.5.4 loaded from CDN (only used in online mode).
+   Falls back gracefully to local-only if blocked. No build step.
 
 ### World coordinates vs viewport
 
@@ -214,8 +249,9 @@ This is a single-file project. There are no other source files.
 
 ```
 .
-├── index.html         # The entire game
-└── README.md          # This file
+├── index.html              # The entire game
+├── tournament-pitch.html   # Pixel-style pitch deck for school tournament
+└── README (1).md           # This file
 ```
 
 ## Tooling
@@ -224,7 +260,7 @@ This is a single-file project. There are no other source files.
   No transpilation needed.
 - **Testing** — Node simulation can run the IIFE with a mock canvas/document/window
   to test specific scenarios (move connect/whiff, ledge grab, blastzone death,
-  endlag punish windows). See past chat history for examples.
+  endlag punish windows).
 
 ## Deployment to GitHub Pages
 
@@ -238,7 +274,7 @@ and make sure the filename is exactly `index.html` — not `index (1).html`).
 
 ## Roadmap / good next features
 
-- Throws on regular grabs (currently Greyson and Kele are the only grab characters via specials)
+- Throws on regular grabs (currently grabs only happen on specials)
 - Wall-jumps for recovery variety
 - Dodge-roll on double-tap direction
 - Hold-to-charge smash attacks
@@ -247,7 +283,6 @@ and make sure the filename is exactly `index.html` — not `index (1).html`).
 - More stages (currently a single fixed stage)
 - Sound effects and music
 - Sprite art replacing placeholder rectangles
-- Online netplay (would require a server, currently out of scope)
 
 ## Tuning levers worth knowing
 
@@ -258,6 +293,8 @@ and make sure the filename is exactly `index.html` — not `index (1).html`).
   at the top of the script.
 - Camera zoom limits and lerp factors are in `updateCamera()`.
 - Blastzone coordinates and ledge positions are in the stage-constants block.
+- Shield drain/regen rates and break-stun duration are in the block-handling section
+  of `Fighter.update()`.
 
 ## Credits
 
