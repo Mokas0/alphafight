@@ -4485,212 +4485,6 @@
     return s;
   }
 
-  // PeerJS config — STUN servers for NAT discovery, plus an ExpressTURN relay
-  // for the strict-NAT/firewall case (school WiFi, etc.) where peers can't
-  // open a direct path. STUN is tried first, TURN is the fallback.
-  //
-  // ------------------------------------------------------------
-  // Networking
-  // ------------------------------------------------------------
-  // Set RELAY_URL to your deployed Fly.io WebSocket relay to bypass WebRTC
-  // entirely. WebRTC fails on networks that DNS-block STUN/TURN domains
-  // (school networks, corporate proxies, some ISPs). The relay uses plain
-  // WSS — looks identical to HTTPS, gets through everywhere normal web
-  // traffic does. See relay/DEPLOY.md for setup.
-  //
-  // If RELAY_URL is empty, the game falls back to PeerJS+WebRTC (original
-  // behavior). Format: 'wss://your-app.fly.dev' (no trailing slash, wss not
-  // https). You can override at runtime by appending ?relayUrl=wss://... .
-  // Auto-fill: when the page is served from a non-localhost origin over
-  // http(s), assume the same host is also running our relay (same Fly.io
-  // app serves both static + WS). Localhost stays empty so dev still hits
-  // PeerJS unless explicitly opted-in.
-  let RELAY_URL = '';
-  try {
-    if (location.protocol === 'http:' || location.protocol === 'https:') {
-      const isLocal = /^(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(location.hostname);
-      if (!isLocal) {
-        RELAY_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
-      }
-    }
-    const u = new URL(location.href).searchParams.get('relayUrl');
-    if (u) RELAY_URL = u;
-  } catch (e) {}
-
-  // DEBUG: append ?relay (or #relay) to the URL to force iceTransportPolicy
-  // = 'relay' — every connection is routed through TURN, bypassing STUN
-  // entirely. Use this to confirm whether TURN itself is reachable on a
-  // given network. If the lobby connects in relay mode but not without it,
-  // the issue is the direct WebRTC path (NAT). If it doesn't connect even
-  // in relay mode, the TURN server / credentials are the problem.
-  // Made into a `let` so the in-game `T` toggle can flip it. Detected from the
-  // URL on first load, but the toggle works without reloading.
-  let RELAY_ONLY = (typeof location !== 'undefined') &&
-    (/[?&#]relay\b/.test(location.href) || location.hash === '#relay');
-  const TURN_USER = '000000002093369940';
-  const TURN_PASS = 'Y/zMMXHaf5XftH1Mg9O5WOlbFfY=';
-  const PEER_CONFIG = {
-    config: {
-      iceTransportPolicy: RELAY_ONLY ? 'relay' : 'all',
-      iceServers: [
-        // STUN — direct peer discovery (skipped if RELAY_ONLY)
-        { urls: 'stun:stun.l.google.com:19302' },
-        { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun.cloudflare.com:3478' },
-        // ExpressTURN relay — primary host plus alternate hostname. Some ISPs
-        // / DNS providers block the `free.expressturn.com` domain (we've seen
-        // err 701 "TURN host lookup received error" from real users), so we
-        // also list `relay1.expressturn.com` which routes to the same backend
-        // through different DNS records.
-        { urls: 'turn:free.expressturn.com:3478?transport=udp',
-          username: TURN_USER, credential: TURN_PASS },
-        { urls: 'turn:free.expressturn.com:3478?transport=tcp',
-          username: TURN_USER, credential: TURN_PASS },
-        { urls: 'turns:free.expressturn.com:5349?transport=tcp',
-          username: TURN_USER, credential: TURN_PASS },
-        { urls: 'turn:relay1.expressturn.com:3478?transport=udp',
-          username: TURN_USER, credential: TURN_PASS },
-        { urls: 'turn:relay1.expressturn.com:3478?transport=tcp',
-          username: TURN_USER, credential: TURN_PASS },
-        { urls: 'turns:relay1.expressturn.com:5349?transport=tcp',
-          username: TURN_USER, credential: TURN_PASS },
-        // OpenRelay (metered.ca) — public free TURN with shared credentials.
-        // Different DNS / different ASN, so if ExpressTURN is DNS-blocked on
-        // a given network this one usually still resolves. Ports 80 and 443
-        // are also offered specifically to slip through firewalls that block
-        // 3478/5349.
-        { urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelayproject', credential: 'openrelayproject' },
-        { urls: 'turns:openrelay.metered.ca:443',
-          username: 'openrelayproject', credential: 'openrelayproject' },
-      ],
-    },
-    debug: 2, // 0=disable, 1=errors, 2=errors+warnings, 3=all
-  };
-  // Returns a fresh PEER_CONFIG with iceTransportPolicy reflecting the
-  // CURRENT value of RELAY_ONLY (so the in-game T toggle takes effect on the
-  // next peer creation without needing a page reload).
-  function currentPeerConfig() {
-    return Object.assign({}, PEER_CONFIG, {
-      config: Object.assign({}, PEER_CONFIG.config, {
-        iceTransportPolicy: RELAY_ONLY ? 'relay' : 'all',
-      }),
-    });
-  }
-  if (RELAY_ONLY) console.log('[net] RELAY_ONLY mode: forcing all WebRTC traffic through TURN');
-
-  function mapPeerError(type) {
-    switch (type) {
-      case 'peer-unavailable':   return 'host code not found — verify the code or wait for host to fully load';
-      case 'unavailable-id':     return 'this room code is taken — pick HOST again to get a new code';
-      case 'invalid-id':         return 'invalid room code format';
-      case 'network':            return 'network error — check your connection';
-      case 'browser-incompatible': return 'this browser does not support WebRTC';
-      case 'disconnected':       return 'disconnected from signaling server — try restarting';
-      case 'webrtc':             return 'WebRTC connection failed — likely a strict NAT/firewall (TURN required)';
-      case 'ssl-unavailable':    return 'page must be served over HTTPS for WebRTC';
-      case 'server-error':       return 'PeerJS signaling server error — try again in a moment';
-      case 'socket-error':       return 'signaling socket error';
-      case 'socket-closed':      return 'signaling connection closed unexpectedly';
-      default:                   return type || 'unknown peer error';
-    }
-  }
-
-  // Inspects the underlying RTCPeerConnection after a DataConnection opens to
-  // log what kind of ICE candidate was actually selected (host / srflx / relay).
-  // "relay" means TURN was used, "srflx" means STUN-discovered direct path,
-  // "host" means same-LAN direct. Useful for diagnosing strict-NAT issues.
-  // Live ICE candidate-gathering trace. Hooks into the underlying RTCPeerConnection
-  // and logs each candidate as it's discovered, plus state changes. Call this as
-  // soon as the data-conn is created so you can watch the negotiation in real
-  // time even if it never reaches "open".
-  function traceIceGathering(conn, label) {
-    try {
-      // PeerJS lazy-creates pc; poll briefly until it appears.
-      let attempts = 0;
-      const tryAttach = () => {
-        const pc = conn.peerConnection;
-        if (!pc) {
-          if (attempts++ < 50) return setTimeout(tryAttach, 100);
-          console.warn('[' + label + '] no peerConnection after 5s');
-          return;
-        }
-        console.log('[' + label + '] attached to pc; iceServers=', pc.getConfiguration().iceServers);
-        pc.addEventListener('icecandidate', (e) => {
-          if (!e.candidate) { console.log('[' + label + '] ICE gathering complete'); return; }
-          const c = e.candidate;
-          console.log('[' + label + '] candidate: type=' + (c.type || '?') +
-            ' protocol=' + (c.protocol || '?') +
-            ' addr=' + (c.address || c.ip || '?') + ':' + (c.port || '?') +
-            ' rel=' + (c.relatedAddress || '-'));
-        });
-        pc.addEventListener('icecandidateerror', (e) => {
-          console.warn('[' + label + '] ICE error: url=' + e.url +
-            ' code=' + e.errorCode + ' text=' + e.errorText);
-        });
-        pc.addEventListener('iceconnectionstatechange', () => {
-          console.log('[' + label + '] iceConnectionState=' + pc.iceConnectionState);
-        });
-        pc.addEventListener('icegatheringstatechange', () => {
-          console.log('[' + label + '] iceGatheringState=' + pc.iceGatheringState);
-        });
-      };
-      tryAttach();
-    } catch (e) { console.warn('traceIceGathering failed', e); }
-  }
-
-  // Standalone TURN test — call testTurn() from the DevTools console to verify
-  // the configured TURN server actually issues relay candidates with our creds.
-  // Logs each candidate type; if you only see 'host'/'srflx', TURN failed.
-  window.testTurn = async function testTurn() {
-    const cfg = currentPeerConfig().config;
-    console.log('[testTurn] using config:', cfg);
-    const pc = new RTCPeerConnection(cfg);
-    pc.onicecandidate = (e) => {
-      if (!e.candidate) { console.log('[testTurn] DONE'); pc.close(); return; }
-      const c = e.candidate;
-      console.log('[testTurn] candidate: type=' + (c.type || '?') +
-        ' protocol=' + (c.protocol || '?') + ' url=' + (c.url || '-'));
-    };
-    pc.onicecandidateerror = (e) => {
-      console.warn('[testTurn] ERROR url=' + e.url + ' code=' + e.errorCode + ' ' + e.errorText);
-    };
-    pc.createDataChannel('probe');
-    const offer = await pc.createOffer();
-    await pc.setLocalDescription(offer);
-    console.log('[testTurn] gathering for 8s...');
-    setTimeout(() => { try { pc.close(); } catch (e) {} }, 8000);
-  };
-
-  async function logIceUsage(conn, label) {
-    try {
-      const pc = conn.peerConnection;
-      if (!pc || !pc.getStats) return;
-      const stats = await pc.getStats();
-      let local, remote;
-      stats.forEach(s => {
-        if (s.type === 'candidate-pair' && s.state === 'succeeded' && s.nominated) {
-          stats.forEach(c => {
-            if (c.id === s.localCandidateId)  local = c;
-            if (c.id === s.remoteCandidateId) remote = c;
-          });
-        }
-      });
-      const lt = local  ? (local.candidateType  || '?') : '?';
-      const rt = remote ? (remote.candidateType || '?') : '?';
-      console.log('[' + label + '] ICE selected: local=' + lt + ' remote=' + rt +
-        (lt === 'relay' || rt === 'relay' ? ' (USING TURN ✓)' : ' (direct path)'));
-      // Surface in HUD too — overwrite a portion of the status line briefly
-      net.iceInfo = (lt === 'relay' || rt === 'relay') ? 'TURN relay' : 'direct (' + lt + '/' + rt + ')';
-    } catch (e) { console.warn('logIceUsage failed', e); }
-  }
-
   function netCleanup() {
     try { net.conn && net.conn.close(); } catch (e) {}
     try { net.peer && net.peer.destroy(); } catch (e) {}
@@ -4701,60 +4495,7 @@
     netPending = null;
   }
 
-  // Returns a PeerJS-DataConnection-shaped object backed by a WebSocket to the
-  // relay. Same .send(obj) / .on('open'|'data'|'close'|'error') / .close() API
-  // so the rest of the netcode is unchanged whether we use WebRTC or the relay.
-  function makeRelayConn(role, code) {
-    const handlers = { open: [], data: [], close: [], error: [] };
-    const emit = (ev, ...a) => (handlers[ev] || []).forEach(h => { try { h(...a); } catch (e) {} });
-    let opened = false, closed = false;
-    let ws;
-    try {
-      ws = new WebSocket(RELAY_URL);
-    } catch (e) {
-      setTimeout(() => emit('error', e), 0);
-      return { send() {}, close() {}, on(ev, fn) { (handlers[ev] = handlers[ev] || []).push(fn); }, _ws: null };
-    }
-    ws.onopen = () => {
-      try { ws.send(JSON.stringify({ t: '__join', code, role })); } catch (e) {}
-    };
-    ws.onmessage = (e) => {
-      let msg = null;
-      try { msg = JSON.parse(typeof e.data === 'string' ? e.data : ''); } catch (err) { return; }
-      if (!msg || typeof msg !== 'object') return;
-      if (typeof msg.t === 'string' && msg.t.startsWith('__')) {
-        if (msg.t === '__joined') {
-          if (msg.peer && !opened) { opened = true; emit('open'); }
-          return;
-        }
-        if (msg.t === '__peer') {
-          if (msg.joined && !opened) { opened = true; emit('open'); }
-          else if (!msg.joined && opened && !closed) { closed = true; emit('close'); }
-          return;
-        }
-        if (msg.t === '__error') {
-          emit('error', new Error('relay: ' + (msg.reason || 'unknown')));
-          return;
-        }
-        return; // unknown control
-      }
-      emit('data', msg);
-    };
-    ws.onerror = (e) => emit('error', e);
-    ws.onclose = () => { if (opened && !closed) { closed = true; emit('close'); } };
-    return {
-      send(obj) {
-        if (!ws || ws.readyState !== 1) return;
-        try { ws.send(JSON.stringify(obj)); } catch (e) {}
-      },
-      close() { try { ws && ws.close(); } catch (e) {} },
-      on(ev, fn) { (handlers[ev] = handlers[ev] || []).push(fn); },
-      _ws: ws,
-    };
-  }
-
   function startHost(localChar) {
-    if (RELAY_URL) return startHostRelay(localChar);
     if (typeof Peer === 'undefined') {
       net.error = 'PeerJS not loaded — host the file on a real URL (Netlify/Pages).';
       return;
@@ -4762,44 +4503,24 @@
     netCleanup();
     net.mode = 'host';
     net.localIndex = 0;
-    net.statusText = 'registering room...';
+    net.statusText = 'creating room...';
     net.error = '';
     const code = 'ab-' + generateRoomCode().toLowerCase(); // 'ab-' prefix to namespace
     net.roomCode = code.slice(3).toUpperCase();
     netPending = { hostChar: localChar, guestChar: null, seed: (Math.random() * 0x7fffffff) | 0 };
-    net.peer = new Peer(code, currentPeerConfig());
-    let openTimeout = setTimeout(() => {
-      if (net.peer && !net.peer.open) {
-        net.statusText = 'signaling slow — still trying...';
-      }
-    }, 6000);
-    net.peer.on('open', () => {
-      clearTimeout(openTimeout);
-      net.statusText = 'waiting for guest to join (' + net.roomCode + ')';
-    });
+    net.peer = new Peer(code);
+    net.peer.on('open', () => { net.statusText = 'waiting for guest...'; });
     net.peer.on('error', e => {
-      const msg = mapPeerError(e && e.type);
-      net.error = msg;
-      net.statusText = 'error: ' + msg;
-      console.warn('[host] peer error', e);
-    });
-    net.peer.on('disconnected', () => {
-      net.statusText = 'lost signaling link — reconnecting...';
-      try { net.peer && net.peer.reconnect(); } catch (e) {}
+      net.error = (e && e.type) || 'peer error';
+      net.statusText = 'error: ' + net.error;
     });
     net.peer.on('connection', conn => {
       net.conn = conn;
-      net.statusText = 'guest joining — handshaking...';
-      traceIceGathering(conn, 'host');
-      const ouTimeout = setTimeout(() => {
-        if (!net.connected) net.statusText = 'WebRTC handshake stuck — likely strict NAT';
-      }, 8000);
       conn.on('open', () => {
-        clearTimeout(ouTimeout);
         net.connected = true;
         net.everConnected = true;
-        net.statusText = 'guest connected — waiting for their character';
-        logIceUsage(conn, 'host');
+        net.statusText = 'guest connected, waiting for char select...';
+        // Send our char + seed
         try {
           conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed });
         } catch (e) {}
@@ -4809,105 +4530,29 @@
         net.connected = false;
         net.statusText = 'guest disconnected';
       });
-      conn.on('error', e => { console.warn('[host] conn error', e); });
     });
   }
 
-  function startHostRelay(localChar) {
-    netCleanup();
-    net.mode = 'host';
-    net.localIndex = 0;
-    net.error = '';
-    net.roomCode = generateRoomCode();
-    net.statusText = 'connecting to relay (' + net.roomCode + ')...';
-    netPending = { hostChar: localChar, guestChar: null, seed: (Math.random() * 0x7fffffff) | 0 };
-    const conn = makeRelayConn('host', net.roomCode);
-    net.conn = conn;
-    let waitTimer = setTimeout(() => {
-      if (!net.connected) net.statusText = 'relay up — waiting for guest (' + net.roomCode + ')';
-    }, 1500);
-    conn.on('open', () => {
-      clearTimeout(waitTimer);
-      net.connected = true;
-      net.everConnected = true;
-      net.statusText = 'guest connected — sending init';
-      try { conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed }); } catch (e) {}
-    });
-    conn.on('data', handleNetMsg);
-    conn.on('close', () => {
-      net.connected = false;
-      net.statusText = 'guest disconnected';
-    });
-    conn.on('error', (e) => {
-      console.warn('[host relay] error', e);
-      const msg = (e && e.message) ? e.message : 'relay error';
-      net.error = msg;
-      net.statusText = 'error: ' + msg;
-    });
-  }
-
-  function startGuestRelay(roomCode, localChar) {
-    netCleanup();
-    net.mode = 'guest';
-    net.localIndex = 1;
-    net.error = '';
-    net.roomCode = roomCode;
-    net.statusText = 'connecting to relay...';
-    netPending = { hostChar: null, guestChar: localChar, seed: null };
-    const conn = makeRelayConn('guest', roomCode);
-    net.conn = conn;
-    conn.on('open', () => {
-      net.connected = true;
-      net.everConnected = true;
-      net.statusText = 'connected — sending character';
-      try { conn.send({ t: 'guestChar', char: netPending.guestChar }); } catch (e) {}
-    });
-    conn.on('data', handleNetMsg);
-    conn.on('close', () => {
-      net.connected = false;
-      net.statusText = 'host disconnected';
-    });
-    conn.on('error', (e) => {
-      console.warn('[guest relay] error', e);
-      const msg = (e && e.message) ? e.message : 'relay error';
-      net.error = msg;
-      net.statusText = 'error: ' + msg;
-    });
-  }
-
-  function startGuest(roomCode, localChar, retriesLeft) {
-    if (RELAY_URL) return startGuestRelay(roomCode, localChar);
+  function startGuest(roomCode, localChar) {
     if (typeof Peer === 'undefined') {
       net.error = 'PeerJS not loaded — host the file on a real URL.';
       return;
     }
-    if (retriesLeft === undefined) retriesLeft = 3;
     netCleanup();
     net.mode = 'guest';
     net.localIndex = 1;
-    net.statusText = 'creating peer...';
+    net.statusText = 'connecting to ' + roomCode + '...';
     net.error = '';
     net.roomCode = roomCode;
     netPending = { hostChar: null, guestChar: localChar, seed: null };
-    net.peer = new Peer(undefined, currentPeerConfig());
-    let connectTimeout;
+    net.peer = new Peer();
     net.peer.on('open', () => {
       const targetId = 'ab-' + roomCode.toLowerCase();
-      net.statusText = 'dialing room ' + roomCode + '...';
       net.conn = net.peer.connect(targetId, { reliable: true });
-      traceIceGathering(net.conn, 'guest');
-      connectTimeout = setTimeout(() => {
-        if (!net.connected) {
-          net.statusText = 'no answer from host — retrying...';
-          if (retriesLeft > 0) startGuest(roomCode, localChar, retriesLeft - 1);
-        }
-      }, 8000);
       net.conn.on('open', () => {
-        clearTimeout(connectTimeout);
         net.connected = true;
         net.everConnected = true;
-        net.statusText = 'connected — sending character';
-        logIceUsage(net.conn, 'guest');
+        net.statusText = 'connected, sending char...';
         try {
           net.conn.send({ t: 'guestChar', char: netPending.guestChar });
         } catch (e) {}
@@ -4917,25 +4562,10 @@
         net.connected = false;
         net.statusText = 'host disconnected';
       });
-      net.conn.on('error', e => { console.warn('[guest] conn error', e); });
     });
     net.peer.on('error', e => {
-      const t = e && e.type;
-      // Auto-retry if host's peer ID is briefly unreachable (host may still be
-      // registering with the signaling server). Up to 3 retries with backoff.
-      if (t === 'peer-unavailable' && retriesLeft > 0) {
-        net.statusText = 'host not ready, retrying in 2s... (' + retriesLeft + ' left)';
-        setTimeout(() => startGuest(roomCode, localChar, retriesLeft - 1), 2000);
-        return;
-      }
-      const msg = mapPeerError(t);
-      net.error = msg;
-      net.statusText = 'error: ' + msg;
-      console.warn('[guest] peer error', e);
-    });
-    net.peer.on('disconnected', () => {
-      net.statusText = 'lost signaling link — reconnecting...';
-      try { net.peer && net.peer.reconnect(); } catch (e) {}
+      net.error = (e && e.type) || 'peer error';
+      net.statusText = 'error: ' + net.error;
     });
   }
 
@@ -7522,7 +7152,7 @@
     ctx.fillStyle = '#fff';
     ctx.font = 'bold 11px sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText((net.mode === 'host' ? 'HOSTING' : 'GUEST') + (RELAY_ONLY ? ' [RELAY]' : ''), W - 192, 22);
+    ctx.fillText(net.mode === 'host' ? 'HOSTING' : 'GUEST', W - 192, 22);
     ctx.fillStyle = net.connected ? '#a0e0d0' : '#ff8a3a';
     ctx.font = '10px monospace';
     ctx.fillText(net.statusText || (net.connected ? 'connected' : 'connecting...'), W - 192, 36);
@@ -7534,8 +7164,7 @@
       ctx.fillText('waiting for peer...', W - 192, 50);
     } else if (net.connected) {
       ctx.fillStyle = '#888';
-      const tail = net.iceInfo ? ` · ${net.iceInfo}` : '';
-      ctx.fillText(`frame ${net.currentFrame}  delay ${net.inputDelay}${tail}`, W - 192, 50);
+      ctx.fillText(`frame ${net.currentFrame}  delay ${net.inputDelay}`, W - 192, 50);
     }
   }
 
@@ -7568,35 +7197,7 @@
     return true;
   }
 
-  function drawRelayBanner() {
-    if (!RELAY_ONLY) return;
-    // Top-of-screen banner so the user knows relay-only mode is on at every
-    // screen (mode select, code entry, char select, play, over).
-    ctx.save();
-    ctx.fillStyle = '#ff6a2a';
-    ctx.fillRect(0, 0, W, 22);
-    ctx.fillStyle = '#000';
-    ctx.font = 'bold 12px monospace';
-    ctx.textAlign = 'center';
-    ctx.fillText('🛰  RELAY MODE: forcing all WebRTC traffic through TURN  ·  press T to toggle', W/2, 15);
-    ctx.textAlign = 'left';
-    ctx.restore();
-  }
-  let _relayKeyPrev = false;
-  function maybeToggleRelay() {
-    // Allow Tap-T anywhere outside the room-code entry stage to flip the flag.
-    // Uses its own prev-key tracker because menuPrevKeys is only updated by
-    // updateMenu(), not during PLAY state.
-    const held = isHeld('KeyT') && menuStage !== 'code';
-    if (held && !_relayKeyPrev) {
-      RELAY_ONLY = !RELAY_ONLY;
-      console.log('[net] RELAY_ONLY toggled →', RELAY_ONLY);
-    }
-    _relayKeyPrev = held;
-  }
-
   function renderFrame() {
-    maybeToggleRelay();
     if (state === STATE.MENU) {
       drawMenu();
       updateMenu();
@@ -7664,7 +7265,6 @@
       netCleanup();
       net.mode = 'local';
     }
-    drawRelayBanner();
   }
 
   // Fixed-timestep accumulator: pin sim to 60Hz regardless of display refresh
