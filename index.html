@@ -2547,8 +2547,22 @@
         ctx.quadraticCurveTo(tipX + sway * 0.4, tipY - 1, tipX + sway, tipY + 3);
         ctx.stroke();
       }
-      // Jonah — sparkle dots floating around body, halo glow when airborne
+      // Jonah — floating golden halo + sparkle dots + airborne halo glow
       if (this.key === 'jonah') {
+        // Persistent halo above head (visible always, drifts up/down)
+        const headTop = bodyY + 2;
+        const headCx  = bodyX + bodyW / 2;
+        const float = Math.sin(this.animTick * 0.08) * 1.2;
+        ctx.strokeStyle = '#ffe14a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(headCx, headTop - 4 + float, 10, 2.5, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255, 240, 180, 0.7)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(headCx, headTop - 4 + float, 8, 1.5, 0, 0, Math.PI * 2);
+        ctx.stroke();
         // Halo glow when airborne
         if (!this.onGround) {
           const pulse = 0.25 + Math.sin(this.animTick * 0.15) * 0.08;
@@ -2568,16 +2582,44 @@
           ctx.fill();
         }
       }
-      // Rhys — gas-mask filter cylinders + spore tufts on shoulders + dripping drool
+      // Rhys — wizard hat + spore tufts on shoulders + dripping drool
       if (this.key === 'rhys') {
         const fwd = this.facing;
-        // Two filter cylinders below the chin
-        ctx.fillStyle = '#2d5c1d';
-        ctx.fillRect(bodyX + bodyW * 0.2, bodyY + bodyH * 0.20, bodyW * 0.18, 5);
-        ctx.fillRect(bodyX + bodyW * 0.62, bodyY + bodyH * 0.20, bodyW * 0.18, 5);
+        // WIZARD HAT — tall pointy purple cone with sickly-green band, brim, gold star
+        const headW = 20, headH = 16;
+        const headTop = bodyY + 2;
+        const headCx  = bodyX + bodyW / 2;
+        const tilt = Math.sin(this.animTick * 0.06) * 0.6;
+        const tipX = headCx + tilt + fwd * 0.5;
+        const tipY = headTop - headH * 1.15;
+        ctx.fillStyle = '#3a2a5a';
+        ctx.beginPath();
+        ctx.moveTo(headCx - headW * 0.45, headTop + 2);
+        ctx.lineTo(headCx + headW * 0.45, headTop + 2);
+        ctx.lineTo(tipX, tipY);
+        ctx.closePath();
+        ctx.fill();
         ctx.fillStyle = '#5aaf3a';
-        ctx.fillRect(bodyX + bodyW * 0.21, bodyY + bodyH * 0.21, bodyW * 0.16, 1.5);
-        ctx.fillRect(bodyX + bodyW * 0.63, bodyY + bodyH * 0.21, bodyW * 0.16, 1.5);
+        ctx.fillRect(headCx - headW * 0.5, headTop + 1, headW, 3);
+        ctx.fillStyle = '#1a1a2a';
+        ctx.beginPath();
+        ctx.ellipse(headCx, headTop + 3, headW * 0.62, 2.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Gold five-point star on the front of the cone
+        const starX = headCx + (tipX - headCx) * 0.45;
+        const starY = headTop - headH * 0.35;
+        const starR = 2.2;
+        ctx.fillStyle = '#ffe14a';
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const r = i % 2 === 0 ? starR : starR * 0.42;
+          const ang = -Math.PI / 2 + i * (Math.PI / 5);
+          const x = starX + Math.cos(ang) * r;
+          const y = starY + Math.sin(ang) * r;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fill();
         // Spore tufts on shoulders
         ctx.fillStyle = '#b6ff6a';
         for (let k = 0; k < 4; k++) {
@@ -6610,6 +6652,235 @@
     consumeKeyLatch();
   }
 
+  // Per-character head accessory used in the character-select cards.
+  // Drawn ABOVE / OVER the basic skin-tone head rectangle. (hx, hy) is the
+  // top-left of the head box; (w, h) is its size. animT drives subtle bob
+  // animations; facing is +1 / -1 for left/right asymmetric pieces.
+  // Each branch hand-tuned so the hat reads distinctly at card resolution
+  // and matches the in-battle look of that character.
+  function drawHeadGear(ctx, hx, hy, w, h, key, animT, facing) {
+    facing = facing || 1;
+    const cx = hx + w / 2;
+    const top = hy;
+    switch (key) {
+      case 'nico': {
+        // Flame tuft — orange outer, yellow inner, animated wobble
+        const t = animT * 0.12;
+        ctx.fillStyle = '#ff6a2a';
+        ctx.beginPath();
+        ctx.moveTo(cx - w * 0.42, top + 1);
+        ctx.quadraticCurveTo(cx - w * 0.18 + Math.sin(t) * 1.2, top - h * 0.7 + Math.sin(t * 1.5) * 1.5,
+                              cx,                top - h * 0.35);
+        ctx.quadraticCurveTo(cx + w * 0.18 + Math.sin(t * 1.3) * 1.2, top - h * 0.85 + Math.sin(t) * 1.5,
+                              cx + w * 0.42, top + 1);
+        ctx.closePath();
+        ctx.fill();
+        ctx.fillStyle = '#ffd24a';
+        ctx.beginPath();
+        ctx.moveTo(cx - w * 0.22, top + 1);
+        ctx.quadraticCurveTo(cx, top - h * 0.45 + Math.sin(t * 1.2) * 1, cx + w * 0.22, top + 1);
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
+      case 'derek': {
+        // Ninja headband (purple band, knot trailing back)
+        ctx.fillStyle = '#3a2a6a';
+        ctx.fillRect(hx, top + h * 0.10, w, h * 0.20);
+        ctx.fillStyle = '#7a5ab8';
+        ctx.fillRect(cx - 1, top + h * 0.13, 2, h * 0.14);
+        ctx.fillStyle = '#3a2a6a';
+        ctx.fillRect(hx - facing * 4, top + h * 0.10, 4, h * 0.45);
+        break;
+      }
+      case 'rhys': {
+        // WIZARD HAT — tall pointy purple cone, sickly-green band, brim, gold star
+        const tilt = Math.sin(animT * 0.06) * 0.6;
+        const tipX = cx + tilt + facing * 0.5;
+        const tipY = top - h * 1.15;
+        // Cone body
+        ctx.fillStyle = '#3a2a5a';
+        ctx.beginPath();
+        ctx.moveTo(cx - w * 0.45, top + 2);
+        ctx.lineTo(cx + w * 0.45, top + 2);
+        ctx.lineTo(tipX, tipY);
+        ctx.closePath();
+        ctx.fill();
+        // Sickly-green band at base
+        ctx.fillStyle = '#5aaf3a';
+        ctx.fillRect(hx, top + 1, w, 3);
+        // Brim — flat oval
+        ctx.fillStyle = '#1a1a2a';
+        ctx.beginPath();
+        ctx.ellipse(cx, top + 3, w * 0.62, 2.5, 0, 0, Math.PI * 2);
+        ctx.fill();
+        // Five-point gold star on the front of the cone
+        const starX = cx + (tipX - cx) * 0.45;
+        const starY = top - h * 0.35;
+        const starR = Math.max(2, w * 0.10);
+        ctx.fillStyle = '#ffe14a';
+        ctx.beginPath();
+        for (let i = 0; i < 10; i++) {
+          const r = i % 2 === 0 ? starR : starR * 0.42;
+          const ang = -Math.PI / 2 + i * (Math.PI / 5);
+          const x = starX + Math.cos(ang) * r;
+          const y = starY + Math.sin(ang) * r;
+          if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        }
+        ctx.closePath();
+        ctx.fill();
+        break;
+      }
+      case 'greyson': {
+        // Olive combat helmet
+        ctx.fillStyle = '#3a4a2a';
+        ctx.fillRect(hx + w * 0.05, top - 2, w * 0.90, h * 0.55);
+        ctx.fillStyle = '#2a3a1a';
+        ctx.fillRect(hx + w * 0.05, top + h * 0.45, w * 0.90, 2);
+        break;
+      }
+      case 'kele': {
+        // Red sweatband + dark headknot
+        ctx.fillStyle = '#a34040';
+        ctx.fillRect(hx + w * 0.05, top + h * 0.18, w * 0.90, h * 0.22);
+        ctx.fillStyle = '#7a2a2a';
+        ctx.fillRect(hx - facing * 3, top + h * 0.18, 4, h * 0.45);
+        break;
+      }
+      case 'jonah': {
+        // Floating golden halo
+        const float = Math.sin(animT * 0.08) * 1.2;
+        ctx.strokeStyle = '#ffe14a';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.ellipse(cx, top - 4 + float, w * 0.5, 2.5, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.strokeStyle = 'rgba(255, 240, 180, 0.7)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.ellipse(cx, top - 4 + float, w * 0.42, 1.5, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      }
+      case 'theo': {
+        // Hood shadow over upper head
+        ctx.fillStyle = 'rgba(20, 8, 40, 0.85)';
+        ctx.beginPath();
+        ctx.moveTo(hx, top + h * 0.65);
+        ctx.quadraticCurveTo(cx, top - h * 0.25, hx + w, top + h * 0.65);
+        ctx.lineTo(hx + w * 0.85, top);
+        ctx.lineTo(hx + w * 0.15, top);
+        ctx.closePath();
+        ctx.fill();
+        // Cyan glowing eyes peeking out of the hood
+        const glow = 0.7 + Math.sin(animT * 0.15) * 0.25;
+        ctx.fillStyle = `rgba(74, 215, 232, ${glow})`;
+        ctx.beginPath();
+        ctx.arc(cx - w * 0.18, top + h * 0.55, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(cx + w * 0.18, top + h * 0.55, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'cole': {
+        // Hardhat with headlamp
+        ctx.fillStyle = '#ff8a3a';
+        ctx.fillRect(hx + w * 0.10, top, w * 0.80, h * 0.42);
+        ctx.fillStyle = '#a34040';
+        ctx.fillRect(hx + w * 0.02, top + h * 0.34, w * 0.96, h * 0.12);
+        const lampX = cx + facing * (w * 0.30);
+        ctx.fillStyle = '#444';
+        ctx.fillRect(lampX - 1.5, top + h * 0.18, 3, 4);
+        ctx.fillStyle = '#ffeb3b';
+        ctx.beginPath();
+        ctx.arc(lampX + facing * 0.5, top + h * 0.27, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'angus': {
+        // Headphones (band + cups) + chunky glasses
+        ctx.fillStyle = '#222';
+        ctx.fillRect(hx + w * 0.08, top - 2, w * 0.84, 3);
+        ctx.fillRect(hx - 2, top + h * 0.08, 4, h * 0.55);
+        ctx.fillRect(hx + w - 2, top + h * 0.08, 4, h * 0.55);
+        // Glasses
+        ctx.fillStyle = '#000';
+        ctx.fillRect(hx + w * 0.13, top + h * 0.42, w * 0.22, h * 0.30);
+        ctx.fillRect(hx + w * 0.65, top + h * 0.42, w * 0.22, h * 0.30);
+        ctx.strokeStyle = '#39ff14';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(hx + w * 0.13, top + h * 0.42, w * 0.22, h * 0.30);
+        ctx.strokeRect(hx + w * 0.65, top + h * 0.42, w * 0.22, h * 0.30);
+        // Bridge
+        ctx.strokeStyle = '#000';
+        ctx.beginPath();
+        ctx.moveTo(hx + w * 0.35, top + h * 0.5);
+        ctx.lineTo(hx + w * 0.65, top + h * 0.5);
+        ctx.stroke();
+        break;
+      }
+      case 'aidan': {
+        // Three-point jester hat with gold bells
+        const t = animT * 0.12;
+        const points = [
+          { dx: -w * 0.36, lift: Math.sin(t) * 1.5 },
+          { dx: 0,         lift: Math.sin(t + 1.5) * 1.5 },
+          { dx: w * 0.36,  lift: Math.sin(t + 3.0) * 1.5 },
+        ];
+        for (const pt of points) {
+          ctx.fillStyle = '#a04ade';
+          ctx.beginPath();
+          ctx.moveTo(cx + pt.dx - 4, top - 1);
+          ctx.lineTo(cx + pt.dx + 4, top - 1);
+          ctx.lineTo(cx + pt.dx, top - h * 0.75 + pt.lift);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = '#ffe14a';
+          ctx.beginPath();
+          ctx.arc(cx + pt.dx, top - h * 0.75 + pt.lift, 2, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        ctx.fillStyle = '#7a2aae';
+        ctx.fillRect(hx + w * 0.1, top - 1, w * 0.8, 3);
+        break;
+      }
+      case 'liam': {
+        // Blue beanie with white pom-pom
+        ctx.fillStyle = '#88ddff';
+        ctx.fillRect(hx + w * 0.08, top - 3, w * 0.84, h * 0.45);
+        ctx.fillStyle = '#5ab0e0';
+        ctx.fillRect(hx + w * 0.08, top + h * 0.36, w * 0.84, 1);
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(cx, top - 5, 2.5, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      }
+      case 'colton': {
+        // Green visor cap with brim sticking out forward
+        ctx.fillStyle = '#3a5a4a';
+        ctx.fillRect(hx + w * 0.08, top - 1, w * 0.84, h * 0.32);
+        ctx.fillStyle = '#ffe14a';
+        ctx.fillRect(hx + w * 0.08, top + h * 0.20, w * 0.84, 1);
+        ctx.fillStyle = '#1a2a1a';
+        const brimX = facing === 1 ? cx : hx + w * 0.05;
+        ctx.fillRect(brimX, top + h * 0.30, w * 0.45, 2);
+        break;
+      }
+      case 'donny': {
+        // Red championship headband with yellow stripe
+        ctx.fillStyle = '#c83030';
+        ctx.fillRect(hx + w * 0.05, top + h * 0.20, w * 0.90, h * 0.22);
+        ctx.fillStyle = '#ffeb3b';
+        ctx.fillRect(hx + w * 0.05, top + h * 0.27, w * 0.90, h * 0.06);
+        ctx.fillStyle = '#a31818';
+        ctx.fillRect(hx - facing * 3, top + h * 0.20, 4, h * 0.45);
+        break;
+      }
+    }
+  }
+
   function drawMenu() {
     // Vertical gradient backdrop instead of flat fill — feels less placeholder.
     const bg = ctx.createLinearGradient(0, 0, 0, H);
@@ -6909,6 +7180,8 @@
       ctx.fillStyle = '#222';
       ctx.fillRect(cx + 2, figY - 8, 3, 3);
       ctx.fillRect(cx - 5, figY - 8, 3, 3);
+      // Per-character head accessory (wizard hat for Rhys, halo for Jonah, etc.)
+      drawHeadGear(ctx, cx - headW/2, figY - 14, headW, headH, CHAR_KEYS[c], animT * 60, 1);
 
       // Name
       ctx.fillStyle = '#ffffff';
