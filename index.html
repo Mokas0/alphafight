@@ -4501,8 +4501,18 @@
   // If RELAY_URL is empty, the game falls back to PeerJS+WebRTC (original
   // behavior). Format: 'wss://your-app.fly.dev' (no trailing slash, wss not
   // https). You can override at runtime by appending ?relayUrl=wss://... .
+  // Auto-fill: when the page is served from a non-localhost origin over
+  // http(s), assume the same host is also running our relay (same Fly.io
+  // app serves both static + WS). Localhost stays empty so dev still hits
+  // PeerJS unless explicitly opted-in.
   let RELAY_URL = '';
   try {
+    if (location.protocol === 'http:' || location.protocol === 'https:') {
+      const isLocal = /^(localhost|127\.|0\.0\.0\.0|\[::1\])/.test(location.hostname);
+      if (!isLocal) {
+        RELAY_URL = (location.protocol === 'https:' ? 'wss://' : 'ws://') + location.host;
+      }
+    }
     const u = new URL(location.href).searchParams.get('relayUrl');
     if (u) RELAY_URL = u;
   } catch (e) {}
