@@ -1511,10 +1511,10 @@
           if (!this.shieldOut) return;
           projectiles.push({
             owner: this, x: this.cx + fwd * 18, y: this.cy + 4,
-            vx: fwd * 11, vy: 0, w: 16, h: 16,
-            life: 80, damage: 8, kbx: fwd * 4, kby: -3,
+            vx: fwd * 14, vy: 0, w: 16, h: 16,
+            life: 140, damage: 8, kbx: fwd * 4, kby: -3,
             type: 'shieldmerang', gravity: 0, spin: 0,
-            phase: 'out', ax: fwd * -0.45,
+            phase: 'out', ax: fwd * -0.30,
           });
         });
       } else if (dir === 'side') {
@@ -1547,9 +1547,9 @@
         this.moveState = { type: 'sing', timer: 78, active: [18, 36], hasHit: null };
         if (this.onGround) this.vx = 0;
       } else if (dir === 'side') {
-        // Dragon Claw — single heavy forward swipe. High damage, long reach.
-        this.moveState = { type: 'dragonClaw', timer: 24, active: [8, 16], hasHit: null };
-        this.vx = this.facing * 4;
+        // Dragon Claw — single heavy forward swipe. Fast startup, big reach.
+        this.moveState = { type: 'dragonClaw', timer: 18, active: [3, 12], hasHit: null };
+        this.vx = this.facing * 7;
       } else if (dir === 'up') {
         // Lightning Jump — vertical recovery with electric body hitbox.
         // Cracks upward in a flash; helpless after if airborne.
@@ -2493,13 +2493,13 @@
         return { x: this.x - 80, y: this.y - 30, w: this.w + 160, h: this.h + 60,
                  damage: 1, kbx: 0, kby: -1, type: 'pierce', stun: 60 };
       }
-      // Whitney: Dragon Claw — single heavy forward swipe
+      // Whitney: Dragon Claw — single heavy forward swipe (long reach)
       if (t === 'dragonClaw') {
-        const elapsed = 24 - this.moveState.timer;
+        const elapsed = 18 - this.moveState.timer;
         const [a, b] = this.moveState.active;
         if (elapsed < a || elapsed > b) return null;
-        return { x: this.facing === 1 ? this.x + this.w - 2 : this.x - 46,
-                 y: this.y + 8, w: 48, h: 36,
+        return { x: this.facing === 1 ? this.x + this.w - 2 : this.x - 70,
+                 y: this.y + 6, w: 72, h: 40,
                  damage: 14, kbx: this.facing * 7, kby: -6, type: 'heavy' };
       }
       // Whitney: Lightning Jump — vertical electric body hitbox during ascent
@@ -3101,16 +3101,16 @@
           ctx.lineWidth = 1.5;
           ctx.stroke();
         }
-        // Dragon Claw: red claw streaks during the swipe
+        // Dragon Claw: red claw streaks during the swipe (long-reach)
         if (this.moveState && this.moveState.type === 'dragonClaw') {
-          const elapsed = 24 - this.moveState.timer;
-          if (elapsed >= 8 && elapsed <= 16) {
+          const elapsed = 18 - this.moveState.timer;
+          if (elapsed >= 3 && elapsed <= 12) {
             ctx.strokeStyle = '#ff3a3a';
-            ctx.lineWidth = 2;
+            ctx.lineWidth = 2.5;
             for (let i = 0; i < 4; i++) {
               ctx.beginPath();
-              ctx.moveTo(this.cx + fwd * 6, this.cy - 6 + i * 6);
-              ctx.lineTo(this.cx + fwd * 40, this.cy - 4 + i * 6);
+              ctx.moveTo(this.cx + fwd * 6, this.cy - 8 + i * 7);
+              ctx.lineTo(this.cx + fwd * 64, this.cy - 6 + i * 7);
               ctx.stroke();
             }
           }
