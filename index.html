@@ -1750,26 +1750,26 @@
         this.vx = this.facing * 1.5;
         this.invuln = Math.max(this.invuln, 3);
       } else if (dir === 'down') {
-        // Animal Attack — throws a random pet upward. Dog (60% chance) is a
-        // damaging arc projectile. Cat (40% chance) lobs UP and on land/expiry
-        // returns to Whitney as a heal.
+        // Stockpile Toss — throws a random projectile from her bag. Rock (60%)
+        // is a damaging stone that arcs forward and hits hard. Healing potion
+        // (40%) lobs UP and on land/expiry returns to Whitney as a heal.
         this.moveState = { type: 'animalThrow', timer: 22 };
-        const isDog = rng() < 0.6;
+        const isRock = rng() < 0.6;
         const fwd = this.facing;
         delaySpawn(6, () => {
-          if (isDog) {
+          if (isRock) {
             projectiles.push({
               owner: this, x: this.cx - 6, y: this.cy - 12,
-              vx: fwd * 4, vy: -11, w: 18, h: 14,
+              vx: fwd * 5, vy: -11, w: 16, h: 14,
               life: 90, damage: 12, kbx: fwd * 4, kby: -7,
-              type: 'dogPet', gravity: 0.5, spin: 0,
+              type: 'rock', gravity: 0.55, spin: 0,
             });
           } else {
             projectiles.push({
               owner: this, x: this.cx - 6, y: this.cy - 12,
-              vx: fwd * 2, vy: -10, w: 16, h: 14,
+              vx: fwd * 2, vy: -10, w: 14, h: 16,
               life: 90, damage: 0, kbx: 0, kby: 0,
-              type: 'catPet', gravity: 0.45, spin: 0, heal: 12,
+              type: 'healPotion', gravity: 0.45, spin: 0, heal: 12,
             });
           }
         });
@@ -5514,7 +5514,7 @@
         if (p.type !== 'sporeTrap' && p.type !== 'firewall' && p.type !== 'gasolinePuddle' &&
             p.type !== 'firePatch' && p.type !== 'poisonCloud' && p.type !== 'iceFloor' &&
             p.type !== 'eightBallSet' && p.type !== 'avalancheMarker' && p.type !== 'flashHit' &&
-            p.type !== 'skiPolePickup' && p.type !== 'shieldmerang' && p.type !== 'catPet') {
+            p.type !== 'skiPolePickup' && p.type !== 'shieldmerang' && p.type !== 'healPotion') {
           p.life = 0;
         }
         spawnEffect(n.x + n.w/2, n.y + n.h/2, '#aaff6a', 14, 16);
@@ -5712,10 +5712,10 @@
           }
         }
       }
-      if (p.type === 'dogPet') p.spin = (p.spin || 0) + 0.18;
-      if (p.type === 'catPet') {
+      if (p.type === 'rock') p.spin = (p.spin || 0) + 0.18;
+      if (p.type === 'healPotion') {
         p.spin = (p.spin || 0) + 0.10;
-        // Cat heals owner on land/expiry. Detect ground or end-of-life.
+        // Potion heals owner on land/expiry (shatters and the heal returns).
         if (!p.consumed && (p.y + p.h >= GROUND_Y || p.life <= 1)) {
           p.consumed = true;
           if (p.owner && p.owner.respawnTimer === 0) {
@@ -5723,6 +5723,9 @@
             spawnEffect(p.owner.cx, p.owner.cy, '#ffe14a', 22, 32);
             spawnEffect(p.owner.cx, p.owner.cy, '#ff6abf', 18, 32);
           }
+          // Glass-shatter sparkle at the potion's land point
+          spawnEffect(p.x + p.w/2, p.y + p.h/2, '#ff6abf', 18, 22);
+          spawnEffect(p.x + p.w/2, p.y + p.h/2, '#ffffff', 12, 22);
           p.life = 0;
         }
       }
@@ -7012,47 +7015,66 @@
         ctx.beginPath(); ctx.arc(0, 0, p.w/2, 0, Math.PI*2); ctx.stroke();
         ctx.restore();
         if (Math.random() < 0.3) spawnEffect(cx, cy, '#ffd84a', 8, 8);
-      } else if (p.type === 'dogPet') {
-        // Brown dog: oval body, head with snout, tail, legs
+      } else if (p.type === 'rock') {
+        // Chunky grey stone with darker facets — rotating tumble
         const cx = p.x + p.w/2, cy = p.y + p.h/2;
-        const fwd = (p.vx >= 0) ? 1 : -1;
-        ctx.fillStyle = '#8a5a30';
-        ctx.fillRect(cx - p.w/2, cy - 2, p.w, 8);
-        ctx.fillRect(cx + fwd * 4, cy - 6, 8, 8);
-        ctx.fillStyle = '#5a3a18';
-        ctx.fillRect(cx + fwd * 10, cy - 3, 4, 4);
-        ctx.fillStyle = '#8a5a30';
-        ctx.fillRect(cx - fwd * 10, cy - 4, 4, 2);
-        ctx.fillRect(cx - 4, cy + 5, 2, 4);
-        ctx.fillRect(cx + 2, cy + 5, 2, 4);
-        ctx.fillStyle = '#000';
-        ctx.fillRect(cx + fwd * 8, cy - 4, 1.5, 1.5);
-        if (Math.random() < 0.2) spawnEffect(cx + fwd * 14, cy - 4, '#ffeb3b', 8, 12);
-      } else if (p.type === 'catPet') {
-        // Pink cat: body, ears, tail, healing sparkles
-        const cx = p.x + p.w/2, cy = p.y + p.h/2;
-        const fwd = (p.vx >= 0) ? 1 : -1;
-        ctx.fillStyle = '#f4d4d4';
-        ctx.fillRect(cx - p.w/2, cy - 2, p.w, 8);
-        ctx.fillRect(cx + fwd * 3, cy - 5, 7, 7);
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(p.spin || 0);
+        ctx.fillStyle = '#7a7a82';
         ctx.beginPath();
-        ctx.moveTo(cx + fwd * 3, cy - 5);
-        ctx.lineTo(cx + fwd * 5, cy - 9);
-        ctx.lineTo(cx + fwd * 6, cy - 5);
+        ctx.moveTo(-p.w/2, -2);
+        ctx.lineTo(-p.w/4, -p.h/2);
+        ctx.lineTo(p.w/3, -p.h/2 + 1);
+        ctx.lineTo(p.w/2, 0);
+        ctx.lineTo(p.w/4, p.h/2);
+        ctx.lineTo(-p.w/3, p.h/2 - 1);
         ctx.closePath();
         ctx.fill();
+        ctx.fillStyle = '#5a5a62';
         ctx.beginPath();
-        ctx.moveTo(cx + fwd * 7, cy - 5);
-        ctx.lineTo(cx + fwd * 9, cy - 9);
-        ctx.lineTo(cx + fwd * 10, cy - 5);
+        ctx.moveTo(-p.w/4, -p.h/2);
+        ctx.lineTo(p.w/3, -p.h/2 + 1);
+        ctx.lineTo(0, -1);
         ctx.closePath();
         ctx.fill();
-        ctx.fillStyle = '#f4d4d4';
-        ctx.fillRect(cx - fwd * 8, cy - 4, 3, 2);
-        ctx.fillRect(cx - fwd * 10, cy - 7, 3, 4);
-        ctx.fillStyle = '#3aae3a';
-        ctx.fillRect(cx + fwd * 7, cy - 3, 1.5, 1.5);
-        if (Math.random() < 0.4) spawnEffect(cx, cy - 4, '#ffe14a', 8, 14);
+        // Bright highlight chip
+        ctx.fillStyle = '#aaaab2';
+        ctx.fillRect(-2, -p.h/2 + 1, 3, 3);
+        ctx.restore();
+      } else if (p.type === 'healPotion') {
+        // Pink potion bottle — neck, body, swirl, gold cap
+        const cx = p.x + p.w/2, cy = p.y + p.h/2;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate((p.spin || 0) * 0.3); // mild wobble
+        // Bottle body
+        ctx.fillStyle = '#ff6abf';
+        ctx.fillRect(-p.w/2 + 1, -p.h/2 + 4, p.w - 2, p.h - 4);
+        // Bright liquid highlight
+        ctx.fillStyle = '#ffaadd';
+        ctx.fillRect(-p.w/2 + 2, -p.h/2 + 4, 2, p.h - 4);
+        // Glass-shine streak
+        ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+        ctx.fillRect(p.w/2 - 4, -p.h/2 + 5, 1.5, p.h - 8);
+        // Bottle neck (narrower)
+        ctx.fillStyle = '#ff6abf';
+        ctx.fillRect(-2, -p.h/2 + 1, 4, 4);
+        // Gold cork/cap on top
+        ctx.fillStyle = '#ffe14a';
+        ctx.fillRect(-3, -p.h/2 - 1, 6, 3);
+        // Heart icon on the bottle
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath();
+        ctx.arc(-1.5, 0, 1.5, 0, Math.PI*2);
+        ctx.arc(1.5, 0, 1.5, 0, Math.PI*2);
+        ctx.moveTo(3, 1);
+        ctx.lineTo(0, 4);
+        ctx.lineTo(-3, 1);
+        ctx.closePath();
+        ctx.fill();
+        ctx.restore();
+        if (Math.random() < 0.3) spawnEffect(cx, cy - 4, '#ffe14a', 8, 14);
       } else if (p.type === 'snowflake') {
         // 6-armed snowflake
         const cx = p.x + p.w/2, cy = p.y + p.h/2;
@@ -8086,7 +8108,7 @@
         { key: 'colton',  moves: ['Pool Ball (0.5s windup)', 'Eight Ball (set + kick)', 'Jump Shot', 'Flashing Mach Spear'] },
         { key: 'donny',   moves: ['Power Punch (windup)', 'Power Dropkick', 'Power Grab (fling up)', 'Ultimate Upper'] },
         { key: 'drew',    moves: ['Shieldmerang (returns)', 'Rushing Sword', 'Shield Ride', 'Shield Spike (meteor)'] },
-        { key: 'whitney', moves: ['Sing (1s stun)', 'Dragon Claw', 'Lightning Jump', 'Animal Attack (dog/cat)'] },
+        { key: 'whitney', moves: ['Sing (1s stun)', 'Dragon Claw', 'Lightning Jump', 'Stockpile Toss (rock/potion)'] },
       ];
       const rowH = 26;
       const startRowY = 184;
