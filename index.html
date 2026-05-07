@@ -419,6 +419,95 @@
     effects.push({ x, y, color, life, maxLife: life, radius });
   }
 
+  function drawParryFlash() {
+    if (parryFlashFrames <= 0) return;
+    parryFlashFrames--;
+    const t = parryFlashFrames / 70;          // 1 → 0 over the lifetime
+    // Vignette flash — bright at start, fading
+    const flash = Math.max(0, t - 0.55) / 0.45;  // first ~0.5s burst
+    if (flash > 0) {
+      ctx.fillStyle = `rgba(255, 240, 180, ${flash * 0.45})`;
+      ctx.fillRect(0, 0, W, H);
+    }
+    // Center text — scale punches up at start, settles, then fades.
+    const grow = Math.min(1, (1 - t) * 4);
+    const scale = grow * (1 + Math.max(0, (1 - t - 0.7)) * 0.4);
+    const alpha = t < 0.15 ? t / 0.15 : 1;
+    ctx.save();
+    ctx.translate(W/2, H/2 - 20);
+    ctx.scale(scale, scale);
+    ctx.textAlign = 'center';
+    // Ribbon backdrop
+    ctx.fillStyle = `rgba(0, 0, 0, ${alpha * 0.6})`;
+    ctx.fillRect(-220, -36, 440, 72);
+    // Big yellow PARRIED text
+    ctx.fillStyle = `rgba(255, 235, 59, ${alpha})`;
+    ctx.font = 'bold 72px sans-serif';
+    ctx.fillText('PARRIED!', 0, 14);
+    // Cyan outline
+    ctx.strokeStyle = `rgba(74, 215, 232, ${alpha * 0.8})`;
+    ctx.lineWidth = 3;
+    ctx.strokeText('PARRIED!', 0, 14);
+    // Subtitle (who pulled it off)
+    if (parryFlashWho) {
+      const name = (parryFlashWho.def && parryFlashWho.def.name) || 'P' + (parryFlashWho.index + 1);
+      ctx.fillStyle = `rgba(255, 255, 255, ${alpha * 0.9})`;
+      ctx.font = 'bold 22px sans-serif';
+      ctx.fillText(name + ' PARRIED', 0, 50);
+    }
+    ctx.textAlign = 'left';
+    ctx.restore();
+    // Diagonal speed lines for VFX flair
+    if (t > 0.6) {
+      const lineAlpha = (t - 0.6) / 0.4;
+      ctx.strokeStyle = `rgba(255, 240, 180, ${lineAlpha * 0.6})`;
+      ctx.lineWidth = 4;
+      const pulse = (1 - t) * 800;
+      for (let i = 0; i < 8; i++) {
+        const ang = i * (Math.PI / 4) + (1 - t) * 0.6;
+        const x1 = W/2 + Math.cos(ang) * (60 + pulse);
+        const y1 = H/2 + Math.sin(ang) * (60 + pulse);
+        const x2 = W/2 + Math.cos(ang) * (140 + pulse);
+        const y2 = H/2 + Math.sin(ang) * (140 + pulse);
+        ctx.beginPath();
+        ctx.moveTo(x1, y1);
+        ctx.lineTo(x2, y2);
+        ctx.stroke();
+      }
+    }
+  }
+
+  // ---------- PARRY ----------
+  // Hit-stop pauses sim ticking for a few frames after a parry; flash drives
+  // the on-screen "PARRIED!" overlay (ticks during render, not sim, so it
+  // animates while the simulation is frozen).
+  let hitstopFrames = 0;
+  let parryFlashFrames = 0;
+  let parryFlashWho = null; // fighter object that pulled off the parry
+
+  function triggerParry(defender, attacker) {
+    hitstopFrames = 24;        // ~0.4s freeze for impact
+    parryFlashFrames = 70;     // ~1.2s flash overlay
+    parryFlashWho = defender;
+    // Stun the attacker for 60 frames (1s). Cancel their move + endlag too.
+    attacker.hitstun = Math.max(attacker.hitstun, 60);
+    attacker.moveState = null;
+    attacker.endlag = 0;
+    attacker.helpless = false;
+    attacker.invuln = 0;
+    // Pop the attacker back a tiny amount and freeze velocity so the stun
+    // reads visibly. Defender gets a brief invuln so multi-hit moves can't
+    // immediately punish through the frozen frame.
+    const dir = attacker.cx > defender.cx ? 1 : -1;
+    attacker.vx = dir * 3;
+    attacker.vy = -2;
+    defender.invuln = Math.max(defender.invuln, 20);
+    // Big visual splash at the contact point.
+    spawnEffect(defender.cx, defender.cy, '#ffffff', 36, 80);
+    spawnEffect(defender.cx, defender.cy, '#ffe14a', 28, 70);
+    spawnEffect(attacker.cx, attacker.cy, '#ff6a2a', 24, 50);
+  }
+
   // ---------- PLAYER CLASS ----------
   class Fighter {
     constructor(charKey, x, facing, index) {
@@ -440,6 +529,7 @@
       this.knockback = { x: 0, y: 0 };
       this.blocking = false;
       this.blockCooldown = 0;
+      this.parryWindow = 0;
       // Shield mechanic — blocking is no longer free. The shield drains while
       // blocking (and additionally drains from absorbed hits), regenerates when
       // not blocking. If it hits 0, the shield "breaks" and the fighter is
@@ -522,6 +612,15 @@
 
     takeDamage(amount, kbx, kby, attacker) {
       if (this.invuln > 0) return false;
+      // PARRY — if the player JUST released block (within parryWindow), any
+      // incoming hit is parried instead. Attacker locked in 60-frame stun,
+      // game freezes briefly, big "PARRIED!" flash. The defender takes no
+      // damage, no KB. Closing the window prevents double-parry on multi-hits.
+      if (this.parryWindow > 0 && attacker && attacker !== this) {
+        this.parryWindow = 0;
+        triggerParry(this, attacker);
+        return true;
+      }
       // Block reduces damage and KB, but DRAINS the shield (more for bigger
       // hits). When shield runs out the fighter is shield-broken: long stun,
       // can't block until it refills. Encourages active play vs turtling.
@@ -593,11 +692,20 @@
       if (this.hitstun > 0 || this.respawnTimer > 0 || this.endlag > 0) return;
 
       // Block — only if you have shield AND aren't in shield-break stun.
+      const wasBlocking = this.blocking;
       if (block && this.onGround && this.shield > 0 && this.shieldBroken === 0
           && !this.moveState && !this.helpless) {
         this.blocking = true;
       } else {
         this.blocking = false;
+      }
+      // PARRY window: releasing block opens a brief invincible window where
+      // any incoming hit triggers a parry (attacker stunned + game freeze).
+      // Only opens on a clean release while the block was actually up; can't
+      // be re-triggered by mashing in the cooldown.
+      if (wasBlocking && !this.blocking && this.shieldBroken === 0) {
+        this.parryWindow = 8;
+        this.blockCooldown = Math.max(this.blockCooldown, 14);
       }
 
       // Movement (locked during moves)
@@ -1739,6 +1847,7 @@
       if (this.counterCooldown > 0) this.counterCooldown--;
       if (this.hitstun > 0) this.hitstun--;
       if (this.blockCooldown > 0) this.blockCooldown--;
+      if (this.parryWindow > 0) this.parryWindow--;
       // Shield: drains while blocking, regenerates otherwise. Self-shatters if
       // held to 0 (so you can't just hold block in a corner indefinitely).
       if (this.blocking) {
@@ -8457,6 +8566,12 @@
   function stepSim() {
     if (state !== STATE.PLAY) return false;
     if (!stepNetworkFrame()) return false;
+    // Hit-stop: parry freeze. Tick down but skip the rest of the sim so
+    // fighters/projectiles/camera/effects stay in place visually.
+    if (hitstopFrames > 0) {
+      hitstopFrames--;
+      return true;
+    }
     tickPendingSpawns();
     for (const f of fighters) f.update();
     updateProjectiles();
@@ -8498,6 +8613,7 @@
       drawOffstageIndicators();
       drawHUD();
       drawNetOverlay();
+      drawParryFlash();
     } else if (state === STATE.OVER) {
       drawBackdrop();
       applyCamera();
