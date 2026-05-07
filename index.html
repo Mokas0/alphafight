@@ -1702,11 +1702,11 @@
           if (!this.shieldOut) return;
           projectiles.push({
             owner: this, x: this.cx + fwd * 18, y: this.cy + 4,
-            vx: fwd * 14, vy: 0, w: 16, h: 16,
-            life: 200, damage: 8, kbx: fwd * 4, kby: -3,
-            // Outbound range ≈ vx² / (2·|ax|) ≈ 400 px (2/5 of stage length).
+            vx: fwd * 15, vy: 0, w: 16, h: 16,
+            life: 300, damage: 8, kbx: fwd * 4, kby: -3,
+            // Outbound range ≈ vx² / (2·|ax|) ≈ 800 px (~full stage length).
             type: 'shieldmerang', gravity: 0, spin: 0,
-            phase: 'out', ax: fwd * -0.24,
+            phase: 'out', ax: fwd * -0.14,
           });
         });
       } else if (dir === 'side') {
