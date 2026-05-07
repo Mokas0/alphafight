@@ -50,6 +50,12 @@
   let menuConfirm = [false, false];
   let menuCursor = 0; // which player is currently selecting
   let winner = null;
+  // Endgame outro phases driven by the OVER state. 'none' = continue prompt
+  // immediate (e.g. menu hard-reset). 'finalKO' = slow-mo + "THAT'S GAME!!"
+  // overlay; sim still ticks at 1/3 speed so the loser's body finishes its
+  // arc into the void. 'winAnim' = sim frozen, winner taunts on a static
+  // background. 'continue' = existing prompt screen.
+  const endgame = { phase: 'none', timer: 0, slowMoCount: 0 };
 
   // ---------- STAGE ----------
   // World coordinates are much bigger than the viewport so fighters can go offstage.
@@ -8480,6 +8486,353 @@
     ctx.textAlign = 'left';
   }
 
+  // "THAT'S GAME!!" splash that appears during the slow-mo final-KO window.
+  // t is the render-frame timer (0..90).
+  function drawThatsGameOverlay(t) {
+    const phase = t / 90;
+    // Vignette darken
+    ctx.fillStyle = `rgba(0, 0, 0, ${Math.min(0.55, phase * 1.0)})`;
+    ctx.fillRect(0, 0, W, H);
+    // Diagonal shutter bars sweeping across
+    const sweep = Math.min(1, phase * 2);
+    ctx.fillStyle = `rgba(255, 235, 59, ${0.18 * sweep})`;
+    for (let i = -2; i < 8; i++) {
+      const sx = (i * 80) + sweep * W * 1.3;
+      ctx.save();
+      ctx.translate(sx, H/2);
+      ctx.rotate(-0.4);
+      ctx.fillRect(-200, -300, 24, 600);
+      ctx.restore();
+    }
+    // Pop-in scale: 0 → 1 in 8 frames, then settles
+    const grow = Math.min(1, t / 8);
+    const wobble = 1 + Math.sin(t * 0.45) * 0.04;
+    ctx.save();
+    ctx.translate(W/2, H/2 - 10);
+    ctx.scale(grow * wobble, grow * wobble);
+    ctx.textAlign = 'center';
+    // Black ribbon
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.8)';
+    ctx.fillRect(-260, -50, 520, 100);
+    // Big white text with red drop-shadow
+    ctx.fillStyle = '#ff3a3a';
+    ctx.font = 'bold 80px sans-serif';
+    ctx.fillText("THAT'S GAME!!", 4, 24);
+    ctx.fillStyle = '#fff';
+    ctx.fillText("THAT'S GAME!!", 0, 20);
+    ctx.strokeStyle = '#ffeb3b';
+    ctx.lineWidth = 3;
+    ctx.strokeText("THAT'S GAME!!", 0, 20);
+    ctx.textAlign = 'left';
+    ctx.restore();
+  }
+
+  // Per-character taunt + "[NAME] WINS!!!" banner during the winAnim phase.
+  // Renders the winner front-and-center on a dimmed backdrop with a unique
+  // animated flair per character. Loser is hidden (already KO'd off-stage).
+  function drawWinTaunt(w, t) {
+    if (!w) return;
+    // Dim everything underneath
+    ctx.fillStyle = 'rgba(8, 8, 18, 0.78)';
+    ctx.fillRect(0, 0, W, H);
+    // Spotlight gradient behind the winner
+    const cx = W/2, cy = H/2 + 40;
+    const beam = ctx.createRadialGradient(cx, cy, 30, cx, cy, 240);
+    beam.addColorStop(0, 'rgba(255, 240, 180, 0.4)');
+    beam.addColorStop(1, 'rgba(255, 240, 180, 0)');
+    ctx.fillStyle = beam;
+    ctx.fillRect(0, 0, W, H);
+    // Move into "stage" coords for the winner sprite. Use a 2.4× zoom so the
+    // standard fighter renderer reads big enough.
+    ctx.save();
+    ctx.translate(cx, cy);
+    ctx.scale(2.4, 2.4);
+    // Move world coord (w.cx, w.cy + w.h/2) so feet anchor at origin.
+    ctx.translate(-w.cx, -(w.y + w.h));
+    // Force a neutral idle frame: clear moveState during render.
+    const savedMs = w.moveState; w.moveState = null;
+    const savedHelp = w.helpless; w.helpless = false;
+    const savedEnd = w.endlag; w.endlag = 0;
+    const savedStun = w.hitstun; w.hitstun = 0;
+    const savedFacing = w.facing; w.facing = 1;
+    // Per-character taunt: lift offset / bounce. Render fighter, then overlay flair.
+    const bounce = Math.sin(t * 0.18) * 4;
+    const origY = w.y; w.y = origY - 30 - bounce; // hover above the floor
+    w.render(ctx);
+    w.y = origY;
+    w.moveState = savedMs;
+    w.helpless = savedHelp;
+    w.endlag = savedEnd;
+    w.hitstun = savedStun;
+    w.facing = savedFacing;
+    ctx.restore();
+
+    // Per-character taunt-specific overlay flair (drawn in screen coords).
+    drawTauntFlair(w, t, cx, cy);
+
+    // "[NAME] WINS!!!" banner along the top
+    const popIn = Math.min(1, t / 12);
+    const wobble = 1 + Math.sin(t * 0.3) * 0.03;
+    ctx.save();
+    ctx.translate(W/2, 110);
+    ctx.scale(popIn * wobble, popIn * wobble);
+    ctx.textAlign = 'center';
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.75)';
+    ctx.fillRect(-340, -44, 680, 90);
+    ctx.fillStyle = w.def.color;
+    ctx.font = 'bold 60px sans-serif';
+    const winText = `${w.def.name.toUpperCase()} WINS!!!`;
+    ctx.fillText(winText, 4, 22);
+    ctx.fillStyle = '#fff';
+    ctx.fillText(winText, 0, 18);
+    ctx.strokeStyle = '#ffeb3b';
+    ctx.lineWidth = 3;
+    ctx.strokeText(winText, 0, 18);
+    ctx.textAlign = 'left';
+    ctx.restore();
+
+    // Player tag below
+    ctx.fillStyle = w.index === 0 ? '#ff6a2a' : '#4ab8ff';
+    ctx.font = 'bold 18px sans-serif';
+    ctx.textAlign = 'center';
+    ctx.fillText(`P${w.index + 1}`, W/2, H - 60);
+    ctx.textAlign = 'left';
+  }
+
+  function drawTauntFlair(w, t, cx, cy) {
+    const k = w.key;
+    // Each branch draws screen-space VFX layered around the centered fighter.
+    if (k === 'nico') {
+      // Roaring flame burst around the fist
+      for (let i = 0; i < 14; i++) {
+        const ang = (i / 14) * Math.PI * 2 + t * 0.08;
+        const r = 70 + Math.sin(t * 0.2 + i) * 10;
+        ctx.fillStyle = `rgba(255, ${100 + i * 8}, 42, ${0.7 - i * 0.04})`;
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(ang) * r, cy - 30 + Math.sin(ang) * r * 0.5, 14, 0, Math.PI*2);
+        ctx.fill();
+      }
+      ctx.fillStyle = '#ffeb3b';
+      ctx.font = 'bold 28px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('🔥 BURN! 🔥', cx, cy + 130);
+      ctx.textAlign = 'left';
+    } else if (k === 'derek') {
+      // Spinning shuriken arcs around him
+      for (let i = 0; i < 5; i++) {
+        const ang = (i / 5) * Math.PI * 2 + t * 0.15;
+        const sx = cx + Math.cos(ang) * 90;
+        const sy = cy - 30 + Math.sin(ang) * 50;
+        ctx.save();
+        ctx.translate(sx, sy);
+        ctx.rotate(t * 0.4 + i);
+        ctx.fillStyle = '#cfd8e8';
+        for (let p = 0; p < 4; p++) {
+          ctx.rotate(Math.PI / 2);
+          ctx.beginPath();
+          ctx.moveTo(0, 0);
+          ctx.lineTo(10, 4);
+          ctx.lineTo(14, 0);
+          ctx.lineTo(10, -4);
+          ctx.closePath();
+          ctx.fill();
+        }
+        ctx.restore();
+      }
+    } else if (k === 'rhys') {
+      // Rising green spore cloud + wand sparkle
+      for (let i = 0; i < 16; i++) {
+        const sx = cx + (rng() - 0.5) * 200;
+        const sy = cy + 50 - (t + i * 8) % 200;
+        ctx.fillStyle = `rgba(90, 175, 58, ${0.6 - ((t + i * 8) % 200) / 350})`;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 8, 0, Math.PI*2);
+        ctx.fill();
+      }
+      // Wand glow
+      const glow = 0.5 + Math.sin(t * 0.3) * 0.5;
+      ctx.fillStyle = `rgba(255, 225, 74, ${glow})`;
+      ctx.beginPath();
+      ctx.arc(cx + 30, cy - 80, 12, 0, Math.PI*2);
+      ctx.fill();
+    } else if (k === 'greyson') {
+      // Salute + rising grenade plume
+      ctx.strokeStyle = '#aaff6a';
+      ctx.lineWidth = 4;
+      ctx.beginPath();
+      ctx.arc(cx, cy - 30, 90, -Math.PI * 0.85, -Math.PI * 0.15);
+      ctx.stroke();
+      // Grenade lobbed up
+      const gy = cy - 100 - Math.abs(Math.sin(t * 0.08)) * 40;
+      ctx.fillStyle = '#3a4f24';
+      ctx.beginPath();
+      ctx.arc(cx + 60, gy, 8, 0, Math.PI*2);
+      ctx.fill();
+    } else if (k === 'kele') {
+      // Bicep flex with sparkle bursts
+      for (let i = 0; i < 6; i++) {
+        const ang = (i / 6) * Math.PI * 2 + Math.sin(t * 0.1) * 0.5;
+        const r = 70 + Math.sin(t * 0.15 + i) * 15;
+        ctx.fillStyle = '#ffeb3b';
+        const sx = cx + Math.cos(ang) * r;
+        const sy = cy - 50 + Math.sin(ang) * r * 0.7;
+        ctx.beginPath();
+        ctx.moveTo(sx, sy - 6);
+        ctx.lineTo(sx + 4, sy);
+        ctx.lineTo(sx, sy + 6);
+        ctx.lineTo(sx - 4, sy);
+        ctx.closePath();
+        ctx.fill();
+      }
+      ctx.fillStyle = '#ffeb3b';
+      ctx.font = 'bold 28px sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText('💪 STRONG 💪', cx, cy + 130);
+      ctx.textAlign = 'left';
+    } else if (k === 'jonah') {
+      // Floating sparkles + halo above
+      ctx.strokeStyle = '#ffe14a';
+      ctx.lineWidth = 3;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy - 130 - Math.sin(t * 0.1) * 6, 60, 14, 0, 0, Math.PI*2);
+      ctx.stroke();
+      for (let i = 0; i < 12; i++) {
+        const sx = cx + (rng() - 0.5) * 220;
+        const sy = cy - (t + i * 12) % 200;
+        ctx.fillStyle = '#a0e0d0';
+        ctx.fillRect(sx, sy, 2, 6);
+        ctx.fillRect(sx - 2, sy + 2, 6, 2);
+      }
+    } else if (k === 'theo') {
+      // Glowing eyes + dark energy ring
+      const pulse = 0.4 + Math.sin(t * 0.2) * 0.3;
+      ctx.strokeStyle = `rgba(74, 215, 232, ${pulse})`;
+      ctx.lineWidth = 5;
+      ctx.beginPath();
+      ctx.arc(cx, cy - 30, 90 + Math.sin(t * 0.1) * 6, 0, Math.PI*2);
+      ctx.stroke();
+      ctx.fillStyle = `rgba(138, 74, 222, ${pulse * 0.4})`;
+      ctx.beginPath();
+      ctx.arc(cx, cy - 30, 100, 0, Math.PI*2);
+      ctx.fill();
+    } else if (k === 'cole') {
+      // Spinning lighter flame
+      for (let i = 0; i < 18; i++) {
+        const ang = (i / 18) * Math.PI * 2 + t * 0.2;
+        const r = 80;
+        const cl = i % 2 ? '#ff8a3a' : '#ffeb3b';
+        ctx.fillStyle = cl;
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(ang) * r, cy - 30 + Math.sin(ang) * r * 0.5, 6, 0, Math.PI*2);
+        ctx.fill();
+      }
+    } else if (k === 'angus') {
+      // Cascading green code symbols
+      const chars = '01<>{}[]/=+#';
+      ctx.fillStyle = '#39ff14';
+      ctx.font = 'bold 14px monospace';
+      for (let i = 0; i < 30; i++) {
+        const sx = cx - 200 + (i * 17) % 400;
+        const sy = ((t * 1.5 + i * 28) % 280);
+        ctx.fillText(chars[(i + Math.floor(t/8)) % chars.length], sx, sy);
+      }
+    } else if (k === 'aidan') {
+      // Confetti burst + jingle bells
+      for (let i = 0; i < 30; i++) {
+        const ang = rng() * Math.PI * 2;
+        const r = (t * 2 + i * 6) % 220;
+        const colors = ['#ff6abf', '#ffe14a', '#7aff8a', '#a04ade', '#4ad7e8'];
+        ctx.fillStyle = colors[i % colors.length];
+        ctx.fillRect(cx + Math.cos(ang) * r, cy - 30 + Math.sin(ang) * r * 0.6, 4, 8);
+      }
+    } else if (k === 'liam') {
+      // Snow swirl
+      for (let i = 0; i < 24; i++) {
+        const ang = (i / 24) * Math.PI * 2 + t * 0.06;
+        const r = 80 + Math.sin(t * 0.1 + i) * 12;
+        ctx.fillStyle = `rgba(255, 255, 255, ${0.7 - i * 0.02})`;
+        ctx.fillRect(cx + Math.cos(ang) * r - 1, cy - 30 + Math.sin(ang) * r * 0.6 - 1, 3, 3);
+      }
+    } else if (k === 'colton') {
+      // Spinning pool balls and cue
+      for (let i = 0; i < 6; i++) {
+        const ang = (i / 6) * Math.PI * 2 + t * 0.12;
+        const r = 90;
+        const colors = ['#ffeb3b', '#3a8aff', '#c83030', '#a04ade', '#ff8a3a', '#3aae3a'];
+        ctx.fillStyle = colors[i];
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(ang) * r, cy - 30 + Math.sin(ang) * r * 0.5, 9, 0, Math.PI*2);
+        ctx.fill();
+        ctx.fillStyle = '#fff';
+        ctx.beginPath();
+        ctx.arc(cx + Math.cos(ang) * r, cy - 30 + Math.sin(ang) * r * 0.5, 4, 0, Math.PI*2);
+        ctx.fill();
+      }
+    } else if (k === 'donny') {
+      // Boxing-glove punch flurry
+      for (let i = 0; i < 8; i++) {
+        const flash = (t + i * 4) % 24;
+        if (flash < 8) {
+          const fx = cx + (rng() - 0.5) * 160;
+          const fy = cy - 30 + (rng() - 0.5) * 100;
+          ctx.fillStyle = '#c83030';
+          ctx.beginPath();
+          ctx.arc(fx, fy, 14 - flash, 0, Math.PI*2);
+          ctx.fill();
+          ctx.fillStyle = '#ffeb3b';
+          ctx.font = 'bold 24px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.fillText('POW!', fx, fy + 6);
+          ctx.textAlign = 'left';
+        }
+      }
+    } else if (k === 'drew') {
+      // Sword raised — sword glow + radiating golden rays
+      ctx.strokeStyle = '#ffd84a';
+      ctx.lineWidth = 3;
+      for (let i = 0; i < 12; i++) {
+        const ang = (i / 12) * Math.PI * 2 + t * 0.04;
+        const r1 = 60, r2 = 150 + Math.sin(t * 0.1 + i) * 20;
+        ctx.beginPath();
+        ctx.moveTo(cx + Math.cos(ang) * r1, cy - 30 + Math.sin(ang) * r1);
+        ctx.lineTo(cx + Math.cos(ang) * r2, cy - 30 + Math.sin(ang) * r2);
+        ctx.stroke();
+      }
+      // Sword glint
+      const glint = 0.5 + Math.sin(t * 0.3) * 0.5;
+      ctx.fillStyle = `rgba(255, 255, 255, ${glint})`;
+      ctx.fillRect(cx + 20, cy - 110, 6, 6);
+    } else if (k === 'whitney') {
+      // Pop-star spotlight + music notes + roses tossed up
+      // Music notes orbit her
+      ctx.fillStyle = '#ffe14a';
+      for (let i = 0; i < 8; i++) {
+        const ang = (i / 8) * Math.PI * 2 + t * 0.1;
+        const r = 100 + Math.sin(t * 0.15 + i) * 12;
+        const sx = cx + Math.cos(ang) * r;
+        const sy = cy - 30 + Math.sin(ang) * r * 0.5;
+        ctx.fillRect(sx - 1, sy - 6, 2, 10);
+        ctx.beginPath();
+        ctx.arc(sx, sy + 4, 3, 0, Math.PI*2);
+        ctx.fill();
+      }
+      // Pink heart shower
+      for (let i = 0; i < 14; i++) {
+        const sx = cx - 220 + ((i * 36 + t * 2) % 440);
+        const sy = (t * 1.2 + i * 18) % 320;
+        ctx.fillStyle = '#ff6abf';
+        ctx.beginPath();
+        ctx.arc(sx - 3, sy, 3, 0, Math.PI*2);
+        ctx.arc(sx + 3, sy, 3, 0, Math.PI*2);
+        ctx.moveTo(sx + 5, sy + 1);
+        ctx.lineTo(sx, sy + 8);
+        ctx.lineTo(sx - 5, sy + 1);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+  }
+
   // ---------- MAIN LOOP ----------
   // ---------- NETWORK STEP ----------
   // Called at the top of every PLAY frame. Returns true if the simulation can
@@ -8564,13 +8917,22 @@
   // One fixed-rate simulation tick. Returns true if the sim advanced this call,
   // false if we're waiting on a remote frame (lockstep) or not in PLAY.
   function stepSim() {
-    if (state !== STATE.PLAY) return false;
+    // Advance sim during PLAY, and also during the finalKO outro phase so
+    // the loser's body finishes its arc — but ticked at 1/3 speed (slow-mo).
+    const inFinalKO = (state === STATE.OVER && endgame.phase === 'finalKO');
+    if (state !== STATE.PLAY && !inFinalKO) return false;
     if (!stepNetworkFrame()) return false;
     // Hit-stop: parry freeze. Tick down but skip the rest of the sim so
     // fighters/projectiles/camera/effects stay in place visually.
     if (hitstopFrames > 0) {
       hitstopFrames--;
       return true;
+    }
+    // Slow-motion during the final-KO phase: skip 2 out of every 3 sim
+    // ticks so the world drags into the dramatic moment.
+    if (inFinalKO) {
+      endgame.slowMoCount = (endgame.slowMoCount + 1) % 3;
+      if (endgame.slowMoCount !== 0) return true;
     }
     tickPendingSpawns();
     for (const f of fighters) f.update();
@@ -8589,6 +8951,10 @@
     if (alive.length === 1 && !winner) {
       winner = alive[0];
       state = STATE.OVER;
+      // Trigger the dramatic outro: slow-mo "THAT'S GAME!!" → win taunt → continue.
+      endgame.phase = 'finalKO';
+      endgame.timer = 0;
+      endgame.slowMoCount = 0;
     }
     // (consumeKeyLatch is called by captureLocalInputBits / snapshotInputsLocal
     //  when an input is actually read into a slot, NOT here. If it fired here,
@@ -8620,29 +8986,54 @@
       drawStage();
       drawProjectiles();
       drawStageNPCs();
-      for (const f of fighters)if (f.stocks > 0) f.render(ctx);
+      // During winAnim phase: draw the loser too, but knocked off-screen / dead
+      // pose. Only the winner gets the taunt overlay.
+      const showLosers = (endgame.phase === 'finalKO');
+      for (const f of fighters) {
+        if (f.stocks > 0) f.render(ctx);
+        else if (showLosers) f.render(ctx);
+      }
       drawEffects();
       releaseCamera();
       drawOffstageIndicators();
       drawHUD();
       drawNetOverlay();
-      drawGameOver();
-      if (keys['Enter']) {
-        if (net.mode !== 'local' && net.connected) {
-          // Lobby: stay connected, drop back into character select for a rematch.
-          state = STATE.MENU;
-          menuStage = 'chars';
-          menuConfirm = [false, false];
-          winner = null;
-          menuPrevKeys = { ...keys }; // suppress edge-detection re-trigger of Enter on next frame
-        } else {
-          // Local mode (or net connection died): full reset to mode select.
-          state = STATE.MENU;
-          menuConfirm = [false, false];
-          winner = null;
-          menuStage = 'mode';
-          netCleanup();
-          net.mode = 'local';
+      drawParryFlash();
+
+      // Endgame outro phase machine. Timer ticks once per render frame.
+      endgame.timer++;
+      if (endgame.phase === 'finalKO') {
+        drawThatsGameOverlay(endgame.timer);
+        if (endgame.timer >= 90) {        // ~1.5s of slow-mo + flash
+          endgame.phase = 'winAnim';
+          endgame.timer = 0;
+        }
+      } else if (endgame.phase === 'winAnim') {
+        drawWinTaunt(winner, endgame.timer);
+        if (endgame.timer >= 180) {       // ~3s of taunt
+          endgame.phase = 'continue';
+          endgame.timer = 0;
+        }
+      } else {
+        drawGameOver();
+        if (keys['Enter']) {
+          endgame.phase = 'none';
+          if (net.mode !== 'local' && net.connected) {
+            // Lobby: stay connected, drop back into character select for a rematch.
+            state = STATE.MENU;
+            menuStage = 'chars';
+            menuConfirm = [false, false];
+            winner = null;
+            menuPrevKeys = { ...keys };
+          } else {
+            // Local mode (or net connection died): full reset to mode select.
+            state = STATE.MENU;
+            menuConfirm = [false, false];
+            winner = null;
+            menuStage = 'mode';
+            netCleanup();
+            net.mode = 'local';
+          }
         }
       }
     }
@@ -8651,6 +9042,7 @@
       menuConfirm = [false, false];
       menuStage = 'mode';
       winner = null;
+      endgame.phase = 'none';
       netCleanup();
       net.mode = 'local';
     }
