@@ -5690,9 +5690,11 @@
         // Phase 2 (back): home toward owner; catch when close.
         if (p.phase === 'out') {
           p.vx += p.ax;
-          // ax pushes against initial throw direction; when vx crosses zero
-          // we switch to homing phase.
-          if ((p.ax > 0 && p.vx <= 0) || (p.ax < 0 && p.vx >= 0)) {
+          // ax pushes against the initial throw. We switch to homing only
+          // when vx has DECELERATED through zero (sign opposite of throw).
+          // Throw right (vx>0, ax<0): switch when vx <= 0.
+          // Throw left  (vx<0, ax>0): switch when vx >= 0.
+          if ((p.ax < 0 && p.vx <= 0) || (p.ax > 0 && p.vx >= 0)) {
             p.phase = 'back';
           }
         } else if (p.phase === 'back') {
