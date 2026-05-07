@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<meta charset="utf-8">
+<title>ALPHA BRAWL // Tournament Rules</title>
+<style>
+  :root {
+    --bg0: #0a0a14;
+    --bg1: #1a1a28;
+    --bg2: #22223a;
+    --p1:  #ff6a2a;
+    --p2:  #4ab8ff;
+    --acc: #ffeb3b;
+    --grn: #39ff14;
+    --pur: #b088ff;
+    --pink: #ff6abf;
+    --txt: #f0f0f5;
+    --dim: #888;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body {
+    height: 100vh; width: 100vw;
+    background: var(--bg0);
+    color: var(--txt);
+    font-family: 'Courier New', 'Lucida Console', monospace;
+    overflow: hidden;
+    image-rendering: pixelated;
+  }
+  /* Pixel grid backdrop */
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background:
+      linear-gradient(180deg, transparent 23px, rgba(255, 106, 42, 0.04) 24px),
+      linear-gradient(90deg,  transparent 23px, rgba(74, 184, 255, 0.04) 24px);
+    background-size: 24px 24px;
+    pointer-events: none;
+    z-index: 0;
+  }
+  /* CRT scanlines */
+  body::after {
+    content: '';
+    position: fixed; inset: 0;
+    background: repeating-linear-gradient(0deg, rgba(0,0,0,0.18), rgba(0,0,0,0.18) 1px, transparent 1px, transparent 3px);
+    pointer-events: none;
+    z-index: 100;
+  }
+  .stage { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; }
+  .slide {
+    position: absolute; inset: 40px 60px 80px 60px;
+    display: none;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    z-index: 1;
+  }
+  .slide.active { display: flex; animation: pop 0.3s steps(4); }
+  @keyframes pop {
+    0%   { transform: translateY(8px); opacity: 0; }
+    100% { transform: translateY(0);   opacity: 1; }
+  }
+  .hud {
+    position: fixed; left: 0; right: 0; bottom: 14px;
+    display: flex; justify-content: space-between;
+    padding: 0 24px;
+    color: var(--dim); font-size: 13px;
+    z-index: 5;
+  }
+  .hud .keys span {
+    background: var(--bg1);
+    border: 1px solid #3a3a55;
+    padding: 2px 8px; margin: 0 2px; color: var(--txt); border-radius: 3px;
+  }
+  .pulse { animation: blink 1s steps(2) infinite; }
+  @keyframes blink { 50% { opacity: 0.3; } }
+
+  h1 {
+    font-size: 76px; line-height: 1; letter-spacing: 6px;
+    text-shadow: 4px 4px 0 #000, 8px 8px 0 var(--bg1);
+    margin-bottom: 24px; text-align: center;
+  }
+  h2 {
+    font-size: 36px; letter-spacing: 4px;
+    text-shadow: 3px 3px 0 #000;
+    margin-bottom: 30px; text-align: center;
+  }
+  h3 { font-size: 20px; letter-spacing: 2px; color: var(--acc); margin-bottom: 16px; }
+  p { font-size: 19px; line-height: 1.55; max-width: 820px; text-align: center; }
+  ul { list-style: none; font-size: 18px; line-height: 1.7; max-width: 820px; }
+  ul li { padding-left: 24px; position: relative; }
+  ul li::before {
+    content: '▸'; position: absolute; left: 0; color: var(--acc);
+  }
+
+  .alpha { color: var(--p1); }
+  .brawl { color: var(--p2); }
+  .acc   { color: var(--acc); }
+  .grn   { color: var(--grn); }
+  .pur   { color: var(--pur); }
+  .pink  { color: var(--pink); }
+  .dim   { color: var(--dim); }
+
+  .panel {
+    background: var(--bg1);
+    border: 2px solid var(--p1);
+    padding: 22px 28px;
+    box-shadow: 6px 6px 0 var(--bg2);
+    margin: 10px 0;
+  }
+  .panel.blue { border-color: var(--p2); }
+  .panel.acc  { border-color: var(--acc); }
+  .panel.grn  { border-color: var(--grn); }
+  .panel.pink { border-color: var(--pink); }
+
+  .grid {
+    display: grid; gap: 14px;
+    margin-top: 10px;
+  }
+  .grid.cols-2 { grid-template-columns: 1fr 1fr; }
+  .grid.cols-3 { grid-template-columns: repeat(3, 1fr); }
+  .grid.cols-4 { grid-template-columns: repeat(4, 1fr); }
+  .stat {
+    background: var(--bg1);
+    border: 2px solid #3a3a55;
+    padding: 14px 18px;
+    text-align: center;
+  }
+  .stat .num { font-size: 38px; color: var(--acc); display: block; }
+  .stat .lbl { font-size: 12px; color: var(--dim); letter-spacing: 2px; }
+
+  .ascii {
+    color: var(--p1);
+    font-size: 11px; line-height: 1.05;
+    white-space: pre;
+    margin-top: 18px;
+    text-align: center;
+  }
+
+  .progress {
+    position: fixed; left: 0; top: 0; height: 4px;
+    background: linear-gradient(90deg, var(--p1), var(--p2), var(--acc));
+    z-index: 5;
+    transition: width 0.2s steps(8);
+  }
+
+  .stamp {
+    color: var(--dim);
+    font-size: 11px;
+    letter-spacing: 3px;
+    margin-top: 8px;
+  }
+
+  /* Schedule timeline */
+  .timeline {
+    display: flex; align-items: stretch; width: 100%;
+    margin: 18px 0; height: 76px;
+    border: 2px solid var(--p2);
+    background: var(--bg1);
+  }
+  .timeline .seg {
+    flex-grow: 1;
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    border-right: 2px solid var(--p2);
+    font-size: 12px;
+    text-align: center;
+    padding: 4px;
+  }
+  .timeline .seg:last-child { border-right: none; }
+  .timeline .seg .min { color: var(--acc); font-weight: bold; font-size: 16px; }
+  .timeline .seg .lbl { color: var(--txt); margin-top: 4px; letter-spacing: 1px; }
+  .timeline .seg .sub { color: var(--dim); font-size: 10px; margin-top: 2px; }
+
+  /* Bracket visualization */
+  .bracket {
+    display: grid;
+    grid-template-columns: 1fr 60px 1fr 60px 1fr;
+    gap: 0 12px;
+    width: 700px;
+    margin: 16px auto;
+    align-items: center;
+  }
+  .bk-col { display: flex; flex-direction: column; gap: 14px; }
+  .bk-col.semis  { gap: 70px; }
+  .bk-col.final  { justify-content: center; }
+  .bk-col.champ  { justify-content: center; }
+  .bk-match {
+    background: var(--bg1);
+    border-left: 4px solid var(--p1);
+    padding: 8px 10px;
+  }
+  .bk-match.blue { border-left-color: var(--p2); }
+  .bk-match.gold { border-left-color: var(--acc); }
+  .bk-match .seed { color: var(--dim); font-size: 10px; letter-spacing: 1px; }
+  .bk-match .vs { color: var(--acc); font-size: 12px; margin: 0 6px; }
+  .bk-match .name { font-size: 14px; letter-spacing: 1px; }
+  .bk-line { color: var(--dim); font-size: 22px; text-align: center; }
+  .champ-card {
+    background: var(--bg1);
+    border: 3px solid var(--acc);
+    padding: 14px 12px;
+    text-align: center;
+    box-shadow: 4px 4px 0 var(--p1);
+  }
+  .champ-card .label { color: var(--acc); font-size: 12px; letter-spacing: 3px; }
+  .champ-card .who { color: var(--txt); font-size: 18px; margin-top: 4px; }
+
+  /* Two-column rule layout */
+  .rule {
+    background: var(--bg1);
+    border: 2px solid var(--p2);
+    padding: 14px 16px;
+    margin: 6px 0;
+  }
+  .rule .head { color: var(--acc); font-size: 16px; letter-spacing: 2px; margin-bottom: 6px; }
+  .rule .body { font-size: 15px; color: var(--txt); line-height: 1.55; }
+
+  /* Stage roster mini-cards */
+  .stage-row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; margin-top: 10px; }
+  .stg {
+    width: 150px; padding: 10px;
+    background: var(--bg1);
+    border-top: 4px solid currentColor;
+    text-align: center;
+  }
+  .stg .nm { font-size: 14px; color: #fff; letter-spacing: 1px; }
+  .stg .dn { font-size: 11px; color: var(--dim); margin-top: 4px; line-height: 1.4; }
+
+  /* Pro-tips list */
+  .tip { background: var(--bg1); border-left: 4px solid var(--grn); padding: 10px 14px; margin: 6px 0; font-size: 15px; line-height: 1.5; }
+  .tip .lead { color: var(--grn); letter-spacing: 2px; font-weight: bold; }
+</style>
+
+<div class="progress" id="progress"></div>
+<div class="stage">
+
+  <!-- ============ SLIDE 1: TITLE ============ -->
+  <div class="slide active" data-slide>
+    <h1><span class="alpha">ALPHA</span> <span class="brawl">BRAWL</span></h1>
+    <h3 class="acc">// TOURNAMENT RULES //</h3>
+    <p class="dim" style="margin-top: 8px; letter-spacing: 3px;">10 PLAYERS · 2 STATIONS · 30 MINUTES</p>
+    <div class="ascii">┌────────────────────────────────────────────┐
+│  3 SWISS ROUNDS  →  TOP-4 BRACKET  →  FINAL │
+└────────────────────────────────────────────┘</div>
+    <p class="stamp pulse">PRESS → TO START</p>
+  </div>
+
+  <!-- ============ SLIDE 2: FORMAT OVERVIEW ============ -->
+  <div class="slide" data-slide>
+    <h2>THE FORMAT</h2>
+    <div class="grid cols-2" style="width: 760px;">
+      <div class="panel">
+        <h3 class="alpha">PHASE 1 — SWISS</h3>
+        <ul>
+          <li>3 rounds, paired by record</li>
+          <li>Everyone plays all 3 rounds</li>
+          <li>No one is eliminated</li>
+          <li>5 matches per round, run in pairs on the 2 stations</li>
+        </ul>
+      </div>
+      <div class="panel blue">
+        <h3 class="brawl">PHASE 2 — TOP-4 BRACKET</h3>
+        <ul>
+          <li>Top 4 by record advance</li>
+          <li>Single-elimination semis + final</li>
+          <li>Seed 1 vs 4 · Seed 2 vs 3</li>
+          <li>Winners face off in the Grand Final</li>
+        </ul>
+      </div>
+    </div>
+    <p class="dim" style="margin-top: 24px; font-size: 14px; letter-spacing: 2px;">
+      EVERYONE GETS 3 GAMES MINIMUM · TOP 4 GET 1–2 MORE
+    </p>
+  </div>
+
+  <!-- ============ SLIDE 3: SCHEDULE ============ -->
+  <div class="slide" data-slide>
+    <h2>30-MINUTE TIMELINE</h2>
+    <div class="timeline" style="max-width: 920px;">
+      <div class="seg">
+        <span class="min">0:00</span>
+        <span class="lbl">ROUND 1</span>
+        <span class="sub">random pairings</span>
+      </div>
+      <div class="seg">
+        <span class="min">0:06</span>
+        <span class="lbl">ROUND 2</span>
+        <span class="sub">paired by record</span>
+      </div>
+      <div class="seg">
+        <span class="min">0:12</span>
+        <span class="lbl">ROUND 3</span>
+        <span class="sub">paired by record</span>
+      </div>
+      <div class="seg" style="background: rgba(255, 235, 59, 0.08);">
+        <span class="min" style="color: var(--p1);">0:19</span>
+        <span class="lbl acc">SEMIS</span>
+        <span class="sub">top 4 cut</span>
+      </div>
+      <div class="seg" style="background: rgba(255, 106, 42, 0.10);">
+        <span class="min" style="color: var(--p1);">0:22</span>
+        <span class="lbl acc">FINAL</span>
+        <span class="sub">crown the champ</span>
+      </div>
+    </div>
+    <div class="grid cols-3" style="margin-top: 24px; max-width: 760px; width: 100%;">
+      <div class="stat"><span class="num">~6m</span><span class="lbl">PER SWISS ROUND</span></div>
+      <div class="stat"><span class="num">~3m</span><span class="lbl">SEMIS (PARALLEL)</span></div>
+      <div class="stat"><span class="num">~3m</span><span class="lbl">GRAND FINAL</span></div>
+    </div>
+    <p class="dim" style="margin-top: 16px; font-size: 13px;">
+      6-MINUTE BUFFER FOR SETUP, RE-PAIRING, AND BATHROOM BREAKS
+    </p>
+  </div>
+
+  <!-- ============ SLIDE 4: MATCH RULES ============ -->
+  <div class="slide" data-slide>
+    <h2>MATCH RULES</h2>
+    <div style="width: 800px;">
+      <div class="rule">
+        <div class="head">⚔  3 STOCKS</div>
+        <div class="body">Standard match length. First to knock the other off 3 times wins.</div>
+      </div>
+      <div class="rule" style="border-color: var(--p1);">
+        <div class="head" style="color: var(--p1);">⚔  ONE GAME PER MATCHUP</div>
+        <div class="body">No best-of-three. One game decides it. Win or lose, you move on.</div>
+      </div>
+      <div class="rule" style="border-color: var(--grn);">
+        <div class="head" style="color: var(--grn);">⏱  4-MINUTE CAP</div>
+        <div class="body">If neither player has 0 stocks at 4:00 → highest stocks remaining wins.
+                            If tied: lower damage % wins. Still tied: sudden death.</div>
+      </div>
+      <div class="rule" style="border-color: var(--pur);">
+        <div class="head" style="color: var(--pur);">🎲  STAGE PICK</div>
+        <div class="body">Loser of the previous match picks the stage from any of the 4 stadiums.
+                            Round 1 / first match: coin flip.</div>
+      </div>
+      <div class="rule" style="border-color: var(--pink);">
+        <div class="head" style="color: var(--pink);">👥  CHARACTER DUPES</div>
+        <div class="body">If both players want the same fighter, the higher seed (or coin-flip winner)
+                            gets first pick.</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 5: STAGES ============ -->
+  <div class="slide" data-slide>
+    <h2>4 STADIUMS</h2>
+    <p class="dim" style="font-size: 14px; letter-spacing: 2px; margin-bottom: 8px;">
+      LOSER PICKS · ALL 4 ARE FAIR GAME
+    </p>
+    <div class="stage-row">
+      <div class="stg" style="color: #3a3a55;">
+        <div class="nm">CLASSIC</div>
+        <div class="dn">Original layout. No surprises. The default skill test.</div>
+      </div>
+      <div class="stg" style="color: #ff6a2a;">
+        <div class="nm">LAVA LAKE</div>
+        <div class="dn">No void below — bottom is damaging lava that bounces you up.</div>
+      </div>
+      <div class="stg" style="color: var(--grn);">
+        <div class="nm">JUBILANT JUNGLE</div>
+        <div class="dn">Animals drop in (20 HP each), attack you on contact.</div>
+      </div>
+      <div class="stg" style="color: var(--pur);">
+        <div class="nm">CRYSTALLINE CAVES</div>
+        <div class="dn">3 small platforms drift to new positions every few seconds.</div>
+      </div>
+    </div>
+    <div class="panel" style="margin-top: 24px; border-color: var(--acc);">
+      <p style="font-size: 16px; letter-spacing: 1px;">
+        <span class="acc">CHAMPION'S CHOICE:</span> the Grand Final stage is picked by
+        whoever finished higher in Swiss.
+      </p>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 6: TIEBREAKERS ============ -->
+  <div class="slide" data-slide>
+    <h2>TIEBREAKERS</h2>
+    <p style="margin-bottom: 18px;" class="dim">Used to seed the top 4 if multiple players share the same record.</p>
+    <div class="grid cols-2" style="width: 760px;">
+      <div class="panel">
+        <h3 class="alpha">1 ▸ WIN-LOSS</h3>
+        <p style="text-align: left; font-size: 16px;">
+          Most wins after 3 Swiss rounds. (3-0 beats 2-1 beats 1-2 beats 0-3.)
+        </p>
+      </div>
+      <div class="panel blue">
+        <h3 class="brawl">2 ▸ STOCK DIFF</h3>
+        <p style="text-align: left; font-size: 16px;">
+          Total stocks taken minus stocks lost across all 3 matches.
+          Bigger number wins.
+        </p>
+      </div>
+      <div class="panel grn">
+        <h3 class="grn">3 ▸ HEAD-TO-HEAD</h3>
+        <p style="text-align: left; font-size: 16px;">
+          If two tied players faced each other in Swiss, whoever won
+          that match gets the higher seed.
+        </p>
+      </div>
+      <div class="panel acc">
+        <h3 class="acc">4 ▸ STRENGTH OF SCHEDULE</h3>
+        <p style="text-align: left; font-size: 16px;">
+          Combined record of all your opponents. Beating tougher
+          fighters earns the higher seed.
+        </p>
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 7: BRACKET ============ -->
+  <div class="slide" data-slide>
+    <h2>TOP-4 BRACKET</h2>
+    <p class="dim" style="font-size: 14px; letter-spacing: 2px; margin-bottom: 8px;">
+      SINGLE ELIMINATION · WIN OR GO HOME
+    </p>
+    <div class="bracket">
+      <!-- Semis column -->
+      <div class="bk-col semis">
+        <div class="bk-match">
+          <div class="seed">SEED #1</div>
+          <div class="name">— TBD —</div>
+          <div class="seed" style="margin-top: 6px;">SEED #4</div>
+          <div class="name">— TBD —</div>
+        </div>
+        <div class="bk-match blue">
+          <div class="seed">SEED #2</div>
+          <div class="name">— TBD —</div>
+          <div class="seed" style="margin-top: 6px;">SEED #3</div>
+          <div class="name">— TBD —</div>
+        </div>
+      </div>
+      <div class="bk-col"><div class="bk-line">▶</div><div class="bk-line" style="margin-top:140px;">▶</div></div>
+      <!-- Final column -->
+      <div class="bk-col final">
+        <div class="bk-match gold">
+          <div class="seed acc">GRAND FINAL</div>
+          <div class="name">SEMI 1 WINNER</div>
+          <div class="seed" style="margin-top: 6px;">vs</div>
+          <div class="name">SEMI 2 WINNER</div>
+        </div>
+      </div>
+      <div class="bk-col"><div class="bk-line">▶</div></div>
+      <!-- Champion -->
+      <div class="bk-col champ">
+        <div class="champ-card">
+          <div class="label">CHAMPION</div>
+          <div class="who">— ? —</div>
+        </div>
+      </div>
+    </div>
+    <p class="dim" style="font-size: 13px; margin-top: 16px;">
+      SEMIS RUN IN PARALLEL ON BOTH STATIONS · GRAND FINAL ON ONE STATION, ALL EYES ON IT
+    </p>
+  </div>
+
+  <!-- ============ SLIDE 8: TO TIPS ============ -->
+  <div class="slide" data-slide>
+    <h2>RUNNING IT CLEAN</h2>
+    <p class="dim" style="font-size: 14px; letter-spacing: 2px; margin-bottom: 8px;">
+      FOR THE TOURNAMENT ORGANIZER
+    </p>
+    <div style="width: 820px;">
+      <div class="tip">
+        <span class="lead">[1]</span> Pick a TO who isn't playing. They handle pairings between rounds. Use Challonge or a Google Sheet — both are free.
+      </div>
+      <div class="tip">
+        <span class="lead">[2]</span> Lock in characters at registration. Players can change once at the top-4 cut. Mid-tournament switching kills the clock.
+      </div>
+      <div class="tip">
+        <span class="lead">[3]</span> Re-pair between Swiss rounds takes 60–90 seconds. Have it ready before previous matches end.
+      </div>
+      <div class="tip">
+        <span class="lead">[4]</span> Designate a "spectator station" while semis run on the 2 mains. Crowd watches there with commentary if you want it.
+      </div>
+      <div class="tip">
+        <span class="lead">[5]</span> If matches run long, drop Round 3 of Swiss → top-4 cut from a 2-round Swiss. Saves ~6 minutes.
+      </div>
+    </div>
+  </div>
+
+  <!-- ============ SLIDE 9: GO ============ -->
+  <div class="slide" data-slide>
+    <h2><span class="alpha">LET'S</span> <span class="brawl">RUN IT</span></h2>
+    <div class="ascii">     ╔═══════════════════════════════╗
+     ║   3 STOCKS · 1 MATCH PER PAIR  ║
+     ║   3 SWISS ROUNDS · TOP-4 CUT   ║
+     ║   30 MINUTES · 1 CHAMPION      ║
+     ╚═══════════════════════════════╝</div>
+    <p style="font-size: 22px; margin-top: 22px;">
+      Fairest format that fits the slot. Everyone plays.
+      <br>The best player wins.
+    </p>
+    <div class="panel acc" style="margin-top: 26px;">
+      <p style="font-size: 22px; letter-spacing: 2px; color: var(--acc);">
+        ▸ READY TO BRAWL ◂
+      </p>
+    </div>
+    <p class="stamp pulse" style="margin-top: 30px;">PRESS → TO RESTART</p>
+  </div>
+
+</div>
+
+<div class="hud">
+  <div>
+    <span class="alpha">ALPHA</span> <span class="brawl">BRAWL</span>
+    <span class="dim">// TOURNAMENT RULES</span>
+  </div>
+  <div class="keys">
+    <span>←</span> <span>→</span> <span class="dim">navigate</span>
+    &nbsp;·&nbsp;
+    <span>F</span> <span class="dim">fullscreen</span>
+  </div>
+  <div id="counter">1 / 9</div>
+</div>
+
+<script>
+(() => {
+  const slides = [...document.querySelectorAll('[data-slide]')];
+  const counter = document.getElementById('counter');
+  const progress = document.getElementById('progress');
+  let i = 0;
+  function show(n) {
+    n = ((n % slides.length) + slides.length) % slides.length;
+    slides.forEach((s, k) => s.classList.toggle('active', k === n));
+    counter.textContent = (n + 1) + ' / ' + slides.length;
+    progress.style.width = (((n + 1) / slides.length) * 100) + '%';
+    i = n;
+  }
+  show(0);
+  document.addEventListener('keydown', e => {
+    if (e.code === 'ArrowRight' || e.code === 'Space' || e.code === 'PageDown') show(i + 1);
+    else if (e.code === 'ArrowLeft' || e.code === 'PageUp') show(i - 1);
+    else if (e.code === 'Home') show(0);
+    else if (e.code === 'End') show(slides.length - 1);
+    else if (e.code === 'KeyF') {
+      if (!document.fullscreenElement) document.documentElement.requestFullscreen?.();
+      else document.exitFullscreen?.();
+    }
+  });
+  document.addEventListener('click', () => show(i + 1));
+})();
+</script>
