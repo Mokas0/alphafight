@@ -66,6 +66,7 @@
   const BLAST_TOP = 100;
   const BLAST_BOTTOM = WORLD_H - 80;
 
+  // Platform layout. Mutable: replaced at match start based on selected stage.
   const platforms = [
     // main stage — solid block in the middle of the world
     { x: STAGE_LEFT, y: STAGE_TOP, w: STAGE_RIGHT - STAGE_LEFT, h: 80, solid: true, main: true },
@@ -74,6 +75,82 @@
     { x: STAGE_RIGHT - 300, y: STAGE_TOP - 120, w: 160, h: 12, solid: true },
     { x: (STAGE_LEFT + STAGE_RIGHT)/2 - 80, y: STAGE_TOP - 220, w: 160, h: 12, solid: true },
   ];
+
+  // Stage definitions. Each entry: human label, archetype, palette, plus a
+  // setup() that mutates `platforms` and an optional perFrame() hook ticked
+  // during match loop.
+  const STAGES = {
+    classic: {
+      name: 'Classic',
+      tagline: 'The original stage. No surprises.',
+      bgTop: '#0e2050', bgBottom: '#3a1d6f',
+      mainColor: '#3a4f78',
+      mainAccent: '#88c8ff',
+      setup() {
+        platforms.length = 0;
+        platforms.push(
+          { x: STAGE_LEFT, y: STAGE_TOP, w: STAGE_RIGHT - STAGE_LEFT, h: 80, solid: true, main: true },
+          { x: STAGE_LEFT + 140, y: STAGE_TOP - 120, w: 160, h: 12, solid: true },
+          { x: STAGE_RIGHT - 300, y: STAGE_TOP - 120, w: 160, h: 12, solid: true },
+          { x: (STAGE_LEFT + STAGE_RIGHT)/2 - 80, y: STAGE_TOP - 220, w: 160, h: 12, solid: true },
+        );
+      },
+    },
+    lavaLake: {
+      name: 'Lava Lake',
+      tagline: 'Bottom is damaging lava that bounces you up — no void.',
+      bgTop: '#3a1010', bgBottom: '#7a2810',
+      mainColor: '#5a2818',
+      mainAccent: '#ff6a2a',
+      setup() {
+        platforms.length = 0;
+        platforms.push(
+          { x: STAGE_LEFT, y: STAGE_TOP, w: STAGE_RIGHT - STAGE_LEFT, h: 80, solid: true, main: true },
+          { x: STAGE_LEFT + 140, y: STAGE_TOP - 120, w: 160, h: 12, solid: true },
+          { x: STAGE_RIGHT - 300, y: STAGE_TOP - 120, w: 160, h: 12, solid: true },
+          { x: (STAGE_LEFT + STAGE_RIGHT)/2 - 80, y: STAGE_TOP - 220, w: 160, h: 12, solid: true },
+        );
+      },
+    },
+    jubilantJungle: {
+      name: 'Jubilant Jungle',
+      tagline: 'Animals leap from above and attack — 20 HP each.',
+      bgTop: '#0e3a1f', bgBottom: '#1f6a3a',
+      mainColor: '#2a4f1a',
+      mainAccent: '#aaff6a',
+      setup() {
+        platforms.length = 0;
+        platforms.push(
+          { x: STAGE_LEFT, y: STAGE_TOP, w: STAGE_RIGHT - STAGE_LEFT, h: 80, solid: true, main: true },
+          { x: STAGE_LEFT + 140, y: STAGE_TOP - 120, w: 160, h: 12, solid: true },
+          { x: STAGE_RIGHT - 300, y: STAGE_TOP - 120, w: 160, h: 12, solid: true },
+          { x: (STAGE_LEFT + STAGE_RIGHT)/2 - 80, y: STAGE_TOP - 220, w: 160, h: 12, solid: true },
+        );
+      },
+    },
+    crystalCaves: {
+      name: 'Crystalline Caves',
+      tagline: 'Three small crystal platforms drift to new positions.',
+      bgTop: '#0e1040', bgBottom: '#3a1d6f',
+      mainColor: '#2a2055',
+      mainAccent: '#aabbff',
+      setup() {
+        platforms.length = 0;
+        platforms.push(
+          { x: STAGE_LEFT, y: STAGE_TOP, w: STAGE_RIGHT - STAGE_LEFT, h: 80, solid: true, main: true },
+          { x: STAGE_LEFT + 200, y: STAGE_TOP - 140, w: 100, h: 10, solid: true, drift: true },
+          { x: STAGE_RIGHT - 300, y: STAGE_TOP - 180, w: 100, h: 10, solid: true, drift: true },
+          { x: (STAGE_LEFT + STAGE_RIGHT)/2 - 50, y: STAGE_TOP - 260, w: 100, h: 10, solid: true, drift: true },
+        );
+      },
+    },
+  };
+  const STAGE_KEYS = ['classic', 'lavaLake', 'jubilantJungle', 'crystalCaves'];
+  let currentStage = 'classic';
+  // Jubilant Jungle: jungle critters that leap in from above and harass fighters.
+  const stageNPCs = [];
+  // Crystal Caves: scheduling for platform drift.
+  let crystalDriftTimer = 0;
 
   // Ledges: grabbable corners of the main stage, for recoveries
   const LEDGE_LEFT = { x: STAGE_LEFT, y: STAGE_TOP, side: -1 };   // -1 = left ledge (faces right)
@@ -1512,9 +1589,10 @@
           projectiles.push({
             owner: this, x: this.cx + fwd * 18, y: this.cy + 4,
             vx: fwd * 14, vy: 0, w: 16, h: 16,
-            life: 140, damage: 8, kbx: fwd * 4, kby: -3,
+            life: 200, damage: 8, kbx: fwd * 4, kby: -3,
+            // Outbound range ≈ vx² / (2·|ax|) ≈ 400 px (2/5 of stage length).
             type: 'shieldmerang', gravity: 0, spin: 0,
-            phase: 'out', ax: fwd * -0.30,
+            phase: 'out', ax: fwd * -0.24,
           });
         });
       } else if (dir === 'side') {
@@ -2238,9 +2316,23 @@
         }
       }
 
-      // Blastzones — check world-space bounds
-      if (this.x + this.w < BLAST_LEFT || this.x > BLAST_RIGHT ||
-          this.y > BLAST_BOTTOM || this.y + this.h < BLAST_TOP) {
+      // Blastzones — check world-space bounds.
+      // Lava Lake: bottom blastzone is replaced with damaging lava that bounces
+      // fighters back up rather than killing them. Sides + top still kill.
+      if (currentStage === 'lavaLake' && this.y > BLAST_BOTTOM - 60 && this.invuln === 0) {
+        // Apply lava-burn damage and bounce back up. Cooldown via invuln so a
+        // single dip doesn't drain stocks instantly.
+        if (this.respawnTimer === 0) {
+          this.takeDamage(8, (this.cx > (STAGE_LEFT + STAGE_RIGHT)/2 ? -3 : 3), -22, this);
+          this.invuln = 30;
+          spawnEffect(this.cx, BLAST_BOTTOM - 30, '#ff6a2a', 30, 30);
+          spawnEffect(this.cx, BLAST_BOTTOM - 30, '#ffeb3b', 22, 30);
+        }
+      }
+      const fellOff = (this.x + this.w < BLAST_LEFT || this.x > BLAST_RIGHT ||
+                      this.y + this.h < BLAST_TOP);
+      const fellDown = (this.y > BLAST_BOTTOM) && (currentStage !== 'lavaLake');
+      if (fellOff || fellDown) {
         this.die();
       }
     }
@@ -4949,7 +5041,7 @@
         net.statusText = 'guest connected, waiting for char select...';
         // Send our char + seed
         try {
-          conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed });
+          conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed, stage: currentStage });
         } catch (e) {}
       });
       conn.on('data', handleNetMsg);
@@ -5003,6 +5095,7 @@
       netPending = netPending || { hostChar: null, guestChar: null, seed: null };
       netPending.hostChar = msg.hostChar;
       netPending.seed = msg.seed;
+      if (msg.stage && STAGES[msg.stage]) currentStage = msg.stage;
       net.statusText = 'host: ' + msg.hostChar + ' — waiting to start';
     } else if (msg.t === 'guestChar') {
       // Host receives this from guest
@@ -5159,6 +5252,10 @@
     projectiles.length = 0;
     effects.length = 0;
     pendingSpawns.length = 0;
+    stageNPCs.length = 0;
+    crystalDriftTimer = 180; // first drift ~3s into match
+    // Apply selected stage geometry. Falls back to classic if key is unknown.
+    (STAGES[currentStage] || STAGES.classic).setup();
     // For local play, freshen the seed each match so moves don't replay identically.
     if (net.mode === 'local') matchSeed = (Date.now() & 0x7fffffff) | 0;
     rngSeed(matchSeed);
@@ -5172,6 +5269,144 @@
     fighters[1].invuln = 60;
     winner = null;
     state = STATE.PLAY;
+  }
+
+  // ---------- STAGE-SPECIFIC PER-FRAME HOOKS ----------
+  function stepStageHook() {
+    if (currentStage === 'jubilantJungle') {
+      // Spawn an animal NPC every ~6 seconds (360 frames at 60Hz)
+      stageNPCs.forEach(n => updateStageNPC(n));
+      for (let i = stageNPCs.length - 1; i >= 0; i--) {
+        if (stageNPCs[i].dead) stageNPCs.splice(i, 1);
+      }
+      if (rng() < 1 / 360 && stageNPCs.length < 3) spawnJungleAnimal();
+    } else if (currentStage === 'crystalCaves') {
+      crystalDriftTimer--;
+      if (crystalDriftTimer <= 0) {
+        // Pick new positions for the 3 drift platforms (any platform with .drift)
+        crystalDriftTimer = 240 + Math.floor(rng() * 120); // 4-6s between drifts
+        const drifters = platforms.filter(p => p.drift);
+        for (const p of drifters) {
+          const minX = STAGE_LEFT - 80;
+          const maxX = STAGE_RIGHT - p.w + 80;
+          const minY = STAGE_TOP - 280;
+          const maxY = STAGE_TOP - 80;
+          p.targetX = minX + rng() * (maxX - minX);
+          p.targetY = minY + rng() * (maxY - minY);
+        }
+      }
+      // Lerp drifting platforms toward their targets each frame.
+      for (const p of platforms) {
+        if (!p.drift) continue;
+        if (p.targetX != null) p.x += (p.targetX - p.x) * 0.04;
+        if (p.targetY != null) p.y += (p.targetY - p.y) * 0.04;
+      }
+    } else if (currentStage === 'lavaLake') {
+      // Decorative bubbles rising from lava surface
+      if (rng() < 0.2) {
+        spawnEffect(STAGE_LEFT + rng() * (STAGE_RIGHT - STAGE_LEFT),
+                    BLAST_BOTTOM - 20, '#ff6a2a', 12, 22);
+      }
+    }
+  }
+
+  function spawnJungleAnimal() {
+    // Pick a random kind and a random spawn x along the stage top.
+    const kinds = ['monkey', 'parrot', 'tiger'];
+    const kind = kinds[Math.floor(rng() * kinds.length)];
+    const x = STAGE_LEFT + 60 + rng() * (STAGE_RIGHT - STAGE_LEFT - 120);
+    stageNPCs.push({
+      kind, x, y: BLAST_TOP - 20, vx: (rng() - 0.5) * 4, vy: 4,
+      w: 22, h: 20, hp: 20, attackCD: 0, dead: false, dieFlash: 0,
+    });
+  }
+
+  function updateStageNPC(n) {
+    if (n.dieFlash > 0) { n.dieFlash--; if (n.dieFlash === 0) n.dead = true; return; }
+    n.vy = Math.min(n.vy + 0.5, 14);
+    n.x += n.vx;
+    n.y += n.vy;
+    // Stand on any solid platform
+    for (const pl of platforms) {
+      if (!pl.solid) continue;
+      if (n.x + n.w > pl.x && n.x < pl.x + pl.w &&
+          n.y + n.h > pl.y && n.y + n.h - n.vy <= pl.y + 2) {
+        n.y = pl.y - n.h;
+        n.vy = 0;
+        n.onGround = true;
+        break;
+      } else {
+        n.onGround = false;
+      }
+    }
+    // Lunge toward nearest fighter when grounded
+    if (n.onGround && fighters && fighters.length) {
+      let nearest = null, nd = 1e9;
+      for (const f of fighters) {
+        if (f.respawnTimer > 0) continue;
+        const d = Math.hypot(f.cx - (n.x + n.w/2), f.cy - (n.y + n.h/2));
+        if (d < nd) { nd = d; nearest = f; }
+      }
+      if (nearest) {
+        const dir = nearest.cx > n.x + n.w/2 ? 1 : -1;
+        n.vx = dir * 2.5;
+        // Hop toward target if fighter is higher
+        if (nearest.cy < n.y - 30 && rng() < 0.06) n.vy = -10;
+      }
+    }
+    // Kill outside blast bounds
+    if (n.x + n.w < BLAST_LEFT - 100 || n.x > BLAST_RIGHT + 100 || n.y > BLAST_BOTTOM + 80) {
+      n.dead = true;
+      return;
+    }
+    // Damage on contact with fighter
+    n.attackCD = Math.max(0, n.attackCD - 1);
+    if (n.attackCD === 0) {
+      for (const f of fighters) {
+        if (f.respawnTimer > 0 || f.invuln > 0) continue;
+        if (n.x + n.w > f.x && n.x < f.x + f.w &&
+            n.y + n.h > f.y && n.y < f.y + f.h) {
+          const kbDir = (f.cx > n.x + n.w/2) ? 1 : -1;
+          f.takeDamage(6, kbDir * 5, -6, null);
+          n.attackCD = 30;
+          spawnEffect(f.cx, f.cy, '#aaff6a', 18, 22);
+          break;
+        }
+      }
+    }
+    // Take damage from any active hitbox / projectile
+    for (const f of fighters) {
+      if (f.respawnTimer > 0) continue;
+      const hb = f.getHitbox();
+      if (hb && hb.x + hb.w > n.x && hb.x < n.x + n.w &&
+              hb.y + hb.h > n.y && hb.y < n.y + n.h) {
+        n.hp -= hb.damage;
+        n.vx = (hb.kbx || 0) * 0.6;
+        n.vy = Math.min(n.vy, (hb.kby || -4));
+        spawnEffect(n.x + n.w/2, n.y + n.h/2, '#ffeb3b', 14, 16);
+        if (n.hp <= 0) {
+          n.dieFlash = 12;
+          spawnEffect(n.x + n.w/2, n.y + n.h/2, '#ffffff', 24, 22);
+        }
+        break;
+      }
+    }
+    for (const p of projectiles) {
+      if (p.life <= 0) continue;
+      if (p.x + p.w > n.x && p.x < n.x + n.w &&
+          p.y + p.h > n.y && p.y < n.y + n.h) {
+        n.hp -= p.damage || 0;
+        if (p.type !== 'sporeTrap' && p.type !== 'firewall' && p.type !== 'gasolinePuddle' &&
+            p.type !== 'firePatch' && p.type !== 'poisonCloud' && p.type !== 'iceFloor' &&
+            p.type !== 'eightBallSet' && p.type !== 'avalancheMarker' && p.type !== 'flashHit' &&
+            p.type !== 'skiPolePickup' && p.type !== 'shieldmerang' && p.type !== 'catPet') {
+          p.life = 0;
+        }
+        spawnEffect(n.x + n.w/2, n.y + n.h/2, '#aaff6a', 14, 16);
+        if (n.hp <= 0) { n.dieFlash = 12; }
+        break;
+      }
+    }
   }
 
   // ---------- PROJECTILE LOGIC ----------
@@ -6093,8 +6328,16 @@
   // ---------- RENDERING ----------
   function drawBackdrop() {
     // Fill the entire screen first (outside the camera transform) — this is the void
-    // outside the stage/blastzone. Fighters falling off will fall into this darkness.
-    ctx.fillStyle = '#0a0a14';
+    // outside the stage/blastzone. Stage palette tints this when in PLAY/OVER.
+    const sd = STAGES[currentStage] || STAGES.classic;
+    if (state === STATE.PLAY || state === STATE.OVER) {
+      const g = ctx.createLinearGradient(0, 0, 0, H);
+      g.addColorStop(0, sd.bgTop);
+      g.addColorStop(1, sd.bgBottom);
+      ctx.fillStyle = g;
+    } else {
+      ctx.fillStyle = '#0a0a14';
+    }
     ctx.fillRect(0, 0, W, H);
   }
 
@@ -6124,17 +6367,71 @@
     ctx.strokeRect(BLAST_LEFT, BLAST_TOP, BLAST_RIGHT - BLAST_LEFT, BLAST_BOTTOM - BLAST_TOP);
     ctx.setLineDash([]);
 
-    // Platforms
+    // Stage-themed lava lake / jungle floor / cave bottom render extras
+    const sd = STAGES[currentStage] || STAGES.classic;
+    if (currentStage === 'lavaLake') {
+      // Lava surface fills below the main platform out to the side blastzones
+      const lavaY = BLAST_BOTTOM - 60;
+      const grad = ctx.createLinearGradient(0, lavaY, 0, BLAST_BOTTOM);
+      grad.addColorStop(0, '#ff8a3a');
+      grad.addColorStop(1, '#a01818');
+      ctx.fillStyle = grad;
+      ctx.fillRect(BLAST_LEFT - 100, lavaY, (BLAST_RIGHT - BLAST_LEFT) + 200, BLAST_BOTTOM - lavaY + 40);
+      // Bubbling surface highlights
+      ctx.fillStyle = '#ffeb3b';
+      const tt = Date.now() * 0.004;
+      for (let bx = BLAST_LEFT; bx < BLAST_RIGHT; bx += 90) {
+        const off = Math.sin(tt + bx * 0.05) * 4;
+        ctx.fillRect(bx + 30, lavaY - 2 + off, 30, 2);
+      }
+    } else if (currentStage === 'jubilantJungle') {
+      // Vines + leaves dangling from the top blast line
+      ctx.fillStyle = '#1a4a1a';
+      for (let vx = BLAST_LEFT; vx < BLAST_RIGHT; vx += 80) {
+        ctx.fillRect(vx + 20, BLAST_TOP, 3, 60 + Math.sin(vx * 0.1) * 14);
+      }
+      ctx.fillStyle = '#3aae3a';
+      for (let vx = BLAST_LEFT; vx < BLAST_RIGHT; vx += 80) {
+        const ly = BLAST_TOP + 60 + Math.sin(vx * 0.1) * 14;
+        ctx.beginPath();
+        ctx.ellipse(vx + 21, ly, 8, 4, 0, 0, Math.PI*2);
+        ctx.fill();
+      }
+    } else if (currentStage === 'crystalCaves') {
+      // Cave glow at top — soft purple
+      const grad = ctx.createLinearGradient(0, BLAST_TOP, 0, STAGE_TOP - 200);
+      grad.addColorStop(0, 'rgba(120, 100, 220, 0.25)');
+      grad.addColorStop(1, 'rgba(120, 100, 220, 0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(BLAST_LEFT - 100, BLAST_TOP, (BLAST_RIGHT - BLAST_LEFT) + 200, STAGE_TOP - BLAST_TOP);
+    }
+
+    // Platforms (themed colors per stage)
     for (const p of platforms) {
       if (p.main) {
-        ctx.fillStyle = '#2f2f48';
+        ctx.fillStyle = sd.mainColor;
         ctx.fillRect(p.x, p.y, p.w, p.h);
-        ctx.fillStyle = '#3a3a55';
+        ctx.fillStyle = sd.mainAccent;
         ctx.fillRect(p.x, p.y, p.w, 4);
         // Grabbable corners — gold highlight
         ctx.fillStyle = '#d4c77a';
         ctx.fillRect(p.x - 2, p.y, 4, 8);
         ctx.fillRect(p.x + p.w - 2, p.y, 4, 8);
+      } else if (p.drift) {
+        // Crystalline cave platforms — angular, glowing
+        ctx.fillStyle = '#5a4ade';
+        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillStyle = '#aabbff';
+        ctx.fillRect(p.x, p.y, p.w, 2);
+        // Crystal facets
+        ctx.strokeStyle = 'rgba(200, 220, 255, 0.6)';
+        ctx.lineWidth = 1;
+        ctx.beginPath();
+        ctx.moveTo(p.x + 8, p.y);
+        ctx.lineTo(p.x + 16, p.y + p.h);
+        ctx.moveTo(p.x + p.w - 8, p.y);
+        ctx.lineTo(p.x + p.w - 16, p.y + p.h);
+        ctx.stroke();
       } else {
         ctx.fillStyle = '#44446a';
         ctx.fillRect(p.x, p.y, p.w, p.h);
@@ -6210,6 +6507,67 @@
         ctx.fillText('!', ax, ay - 16);
         ctx.textAlign = 'left';
       }
+    }
+  }
+
+  function drawStageNPCs() {
+    if (currentStage !== 'jubilantJungle') return;
+    for (const n of stageNPCs) {
+      ctx.save();
+      if (n.dieFlash > 0) ctx.globalAlpha = 0.5 + 0.5 * Math.sin(n.dieFlash);
+      const cx = n.x + n.w/2, cy = n.y + n.h/2;
+      const fwd = n.vx >= 0 ? 1 : -1;
+      if (n.kind === 'monkey') {
+        ctx.fillStyle = '#5a3a18';
+        ctx.fillRect(n.x, n.y + 4, n.w, n.h - 4);
+        ctx.fillStyle = '#a37040';
+        ctx.fillRect(n.x + 4, n.y + 8, n.w - 8, 6);
+        // Head
+        ctx.fillStyle = '#5a3a18';
+        ctx.fillRect(cx + fwd * 4, n.y, 10, 10);
+        ctx.fillStyle = '#a37040';
+        ctx.fillRect(cx + fwd * 6, n.y + 3, 6, 5);
+        // Eyes
+        ctx.fillStyle = '#000';
+        ctx.fillRect(cx + fwd * 8, n.y + 4, 1.5, 1.5);
+        ctx.fillRect(cx + fwd * 11, n.y + 4, 1.5, 1.5);
+      } else if (n.kind === 'parrot') {
+        // Red body, yellow wing, blue head
+        ctx.fillStyle = '#c83030';
+        ctx.fillRect(n.x, n.y + 4, n.w - 4, n.h - 6);
+        ctx.fillStyle = '#ffeb3b';
+        ctx.fillRect(n.x + 4, n.y + 6, n.w - 12, 6);
+        ctx.fillStyle = '#3a8aff';
+        ctx.fillRect(cx + fwd * 4, n.y, 8, 8);
+        // Beak
+        ctx.fillStyle = '#ffd84a';
+        ctx.fillRect(cx + fwd * 12, n.y + 2, 3, 3);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(cx + fwd * 7, n.y + 3, 1.5, 1.5);
+      } else if (n.kind === 'tiger') {
+        // Orange + black stripes
+        ctx.fillStyle = '#ff8a3a';
+        ctx.fillRect(n.x, n.y + 4, n.w, n.h - 4);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(n.x + 4, n.y + 6, 2, 8);
+        ctx.fillRect(n.x + 10, n.y + 6, 2, 8);
+        ctx.fillRect(n.x + 16, n.y + 6, 2, 8);
+        ctx.fillStyle = '#ff8a3a';
+        ctx.fillRect(cx + fwd * 4, n.y, 10, 10);
+        ctx.fillStyle = '#000';
+        ctx.fillRect(cx + fwd * 8, n.y + 4, 1.5, 1.5);
+        ctx.fillRect(cx + fwd * 12, n.y + 4, 1.5, 1.5);
+        // Teeth
+        ctx.fillStyle = '#fff';
+        ctx.fillRect(cx + fwd * 11, n.y + 8, 2, 2);
+      }
+      // HP bar above the critter
+      const barW = 20, hpFrac = Math.max(0, n.hp / 20);
+      ctx.fillStyle = '#222';
+      ctx.fillRect(cx - barW/2, n.y - 6, barW, 3);
+      ctx.fillStyle = hpFrac > 0.5 ? '#aaff6a' : (hpFrac > 0.2 ? '#ffeb3b' : '#ff4040');
+      ctx.fillRect(cx - barW/2, n.y - 6, barW * hpFrac, 3);
+      ctx.restore();
     }
   }
 
@@ -7020,8 +7378,9 @@
 
   // ---------- MENU ----------
   let menuPrevKeys = {};
-  let menuStage = 'mode';      // 'mode' | 'code' | 'chars' | 'movesets'
+  let menuStage = 'mode';      // 'mode' | 'code' | 'stadium' | 'chars' | 'movesets'
   let menuModeIdx = 0;          // 0=LOCAL, 1=HOST, 2=JOIN, 3=MOVESETS
+  let menuStadiumIdx = 0;       // index into STAGE_KEYS
   let joinCodeInput = '';
   const MODE_LABELS = ['LOCAL 2P', 'HOST ONLINE', 'JOIN ONLINE', 'MOVESET KEY'];
   const ROOM_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
@@ -7039,10 +7398,10 @@
       if (tap(c0.special)) {
         if (menuModeIdx === 0) {
           net.mode = 'local';
-          menuStage = 'chars';
+          menuStage = 'stadium';
         } else if (menuModeIdx === 1) {
           net.mode = 'host';
-          menuStage = 'chars';
+          menuStage = 'stadium';
         } else if (menuModeIdx === 2) {
           net.mode = 'guest';
           joinCodeInput = '';
@@ -7051,6 +7410,19 @@
           // MOVESET KEY — open the moveset reference panel.
           menuStage = 'movesets';
         }
+      }
+    } else if (menuStage === 'stadium') {
+      // P1 navigates the stadium grid with left/right; special confirms.
+      // Block goes back to mode select.
+      if (tap(c0.left)) menuStadiumIdx = (menuStadiumIdx + STAGE_KEYS.length - 1) % STAGE_KEYS.length;
+      if (tap(c0.right)) menuStadiumIdx = (menuStadiumIdx + 1) % STAGE_KEYS.length;
+      if (tap(c0.special)) {
+        currentStage = STAGE_KEYS[menuStadiumIdx];
+        menuStage = 'chars';
+      }
+      if (tap(c0.block)) {
+        menuStage = 'mode';
+        net.mode = 'local';
       }
     } else if (menuStage === 'movesets') {
       // Block / Escape returns to mode select.
@@ -7095,7 +7467,7 @@
                 startHost(CHAR_KEYS[menuSel[0]]);
               } else if (net.conn && netPending) {
                 netPending.hostChar = CHAR_KEYS[menuSel[0]];
-                try { net.conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed }); } catch (e) {}
+                try { net.conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed, stage: currentStage }); } catch (e) {}
               }
             } else if (net.mode === 'guest') {
               if (!net.peer) {
@@ -7492,6 +7864,83 @@
       ctx.font = '12px sans-serif';
       ctx.fillText('P1: A/D cycle, F confirm', W/2, H - 60);
       ctx.fillText('Online play needs the page hosted on a real URL (Netlify Drop / GitHub Pages).', W/2, H - 38);
+      ctx.textAlign = 'left';
+      return;
+    }
+
+    if (menuStage === 'stadium') {
+      ctx.textAlign = 'center';
+      ctx.fillStyle = '#ffeb3b';
+      ctx.font = 'bold 28px sans-serif';
+      ctx.fillText('PICK A STADIUM', W/2, 100);
+      ctx.fillStyle = '#aaa';
+      ctx.font = '13px sans-serif';
+      ctx.fillText('A/D to cycle  ·  F to confirm  ·  L-Shift to go back', W/2, 124);
+
+      // 4 stadium cards in a row
+      const cardW = 200, cardH = 200, gap = 20;
+      const totalW = STAGE_KEYS.length * cardW + (STAGE_KEYS.length - 1) * gap;
+      const startX = W/2 - totalW/2;
+      const cardY = 160;
+      for (let i = 0; i < STAGE_KEYS.length; i++) {
+        const sk = STAGE_KEYS[i];
+        const sd = STAGES[sk];
+        const cx = startX + i * (cardW + gap);
+        const sel = i === menuStadiumIdx;
+        // Card backdrop with stage's own gradient as preview
+        const grad = ctx.createLinearGradient(cx, cardY, cx, cardY + cardH);
+        grad.addColorStop(0, sd.bgTop);
+        grad.addColorStop(1, sd.bgBottom);
+        ctx.fillStyle = grad;
+        ctx.fillRect(cx, cardY, cardW, cardH);
+        // Mini stage silhouette
+        ctx.fillStyle = sd.mainColor;
+        ctx.fillRect(cx + 30, cardY + 110, cardW - 60, 24);
+        ctx.fillStyle = sd.mainAccent;
+        ctx.fillRect(cx + 30, cardY + 110, cardW - 60, 3);
+        // Mini-floating-platforms
+        ctx.fillStyle = '#5a5a82';
+        if (sk === 'crystalCaves') {
+          ctx.fillStyle = '#5a4ade';
+          ctx.fillRect(cx + 50, cardY + 80, 30, 4);
+          ctx.fillRect(cx + 90, cardY + 60, 30, 4);
+          ctx.fillRect(cx + 130, cardY + 90, 30, 4);
+        } else {
+          ctx.fillRect(cx + 50, cardY + 80, 30, 4);
+          ctx.fillRect(cx + 130, cardY + 80, 30, 4);
+          ctx.fillRect(cx + 90, cardY + 60, 30, 4);
+        }
+        // Stage-specific signature element
+        if (sk === 'lavaLake') {
+          ctx.fillStyle = '#ff6a2a';
+          ctx.fillRect(cx + 5, cardY + 160, cardW - 10, 30);
+          ctx.fillStyle = '#ffeb3b';
+          ctx.fillRect(cx + 20, cardY + 162, 8, 2);
+          ctx.fillRect(cx + 80, cardY + 162, 8, 2);
+          ctx.fillRect(cx + 140, cardY + 162, 8, 2);
+        } else if (sk === 'jubilantJungle') {
+          // Vines + a critter silhouette dropping
+          ctx.fillStyle = '#3aae3a';
+          for (let vx = 0; vx < cardW; vx += 22) {
+            ctx.fillRect(cx + vx + 8, cardY + 6, 2, 18);
+          }
+          ctx.fillStyle = '#ff8a3a';
+          ctx.fillRect(cx + cardW/2 - 6, cardY + 40, 12, 8);
+        }
+        // Border (highlighted if selected)
+        ctx.strokeStyle = sel ? '#ff6a2a' : '#3a3a55';
+        ctx.lineWidth = sel ? 4 : 1.5;
+        ctx.strokeRect(cx, cardY, cardW, cardH);
+        // Title
+        ctx.fillStyle = sel ? '#ffeb3b' : '#fff';
+        ctx.font = 'bold 16px sans-serif';
+        ctx.fillText(sd.name, cx + cardW/2, cardY + 28);
+      }
+      // Tagline below the row
+      const sd = STAGES[STAGE_KEYS[menuStadiumIdx]];
+      ctx.fillStyle = '#aaa';
+      ctx.font = '14px sans-serif';
+      ctx.fillText(sd.tagline, W/2, cardY + cardH + 36);
       ctx.textAlign = 'left';
       return;
     }
@@ -8012,6 +8461,7 @@
     for (const f of fighters) f.update();
     updateProjectiles();
     resolveMelee();
+    stepStageHook();
     updateCamera();
     // Online: every 60 frames, exchange a state hash with the peer.
     if (net.mode !== 'local' && net.connected && net.currentFrame > 0 && net.currentFrame % 60 === 0) {
@@ -8041,7 +8491,8 @@
       applyCamera();
       drawStage();
       drawProjectiles();
-      for (const f of fighters) f.render(ctx);
+      drawStageNPCs();
+      for (const f of fighters)f.render(ctx);
       drawEffects();
       releaseCamera();
       drawOffstageIndicators();
@@ -8052,7 +8503,8 @@
       applyCamera();
       drawStage();
       drawProjectiles();
-      for (const f of fighters) if (f.stocks > 0) f.render(ctx);
+      drawStageNPCs();
+      for (const f of fighters)if (f.stocks > 0) f.render(ctx);
       drawEffects();
       releaseCamera();
       drawOffstageIndicators();
