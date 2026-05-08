@@ -656,6 +656,10 @@
       // Locks out re-throwing until the shield returns / despawns.
       this.shieldOut = false;
 
+      // Aerial chain: count of mid-air attacks since last touchdown. Resets
+      // on land. Cap is per-character; heavy fighters chain less.
+      this.aerialChain = { count: 0 };
+
       // inputs
       this.prevSpecial = false;
       this.prevBlock = false;
@@ -846,11 +850,34 @@
         this.startSpecial(dir);
       }
 
+      // Shield-grab: blocking + attack tap → grab attempt. The grab pierces
+      // shield and on connect locks the victim into a held state until the
+      // grabber throws (direction at release determines throw type).
+      if (attack && !prevAttack && this.blocking && !this.moveState && this.onGround) {
+        this.blocking = false;
+        this.moveState = {
+          type: 'shieldGrab', timer: 16, active: [4, 12],
+          held: null, holdTimer: 0, mashes: 0,
+        };
+        playSound('whoosh');
+      }
+
       // Regular attack trigger (edge detect) — blocked while helpless
-      if (attack && !prevAttack && !this.moveState && this.attackCooldown <= 0 && !this.blocking && !this.helpless) {
+      // AERIAL CHAIN: while airborne, a different aerial than the one
+      // currently in recovery can cancel and start immediately. Same-type
+      // chains and dair are excluded (dair is a spike — keep the read).
+      const inRecoveryAerial = this.moveState
+        && typeof this.moveState.type === 'string'
+        && this.moveState.type.startsWith('atk_')
+        && ['atk_nair','atk_fair','atk_bair','atk_uair'].includes(this.moveState.type)
+        && !this.onGround
+        && (this.moveState.timer < (this.moveState.initTimer || this.attackInitialTimer(this.moveState.type)) - this.moveState.active[1]);
+      const canChain = inRecoveryAerial && this.aerialChain.count < this.aerialChainCap();
+
+      if (attack && !prevAttack && !this.blocking && !this.helpless &&
+          (canChain || (!this.moveState && this.attackCooldown <= 0))) {
         let dir = 'neutral';
         if (!this.onGround) {
-          // Aerials: up/down/side/neutral air
           if (up) dir = 'upair';
           else if (down) dir = 'dair';
           else if ((left && this.facing === -1) || (right && this.facing === 1)) dir = 'fair';
@@ -862,7 +889,22 @@
           else if (left || right) dir = 'sidetilt';
           else dir = 'jab';
         }
-        this.startAttack(dir);
+        // Block same-type chains and dair-cancels.
+        const chainBlock = canChain && (
+          (dir === 'nair' && this.moveState.type === 'atk_nair') ||
+          (dir === 'fair' && this.moveState.type === 'atk_fair') ||
+          (dir === 'bair' && this.moveState.type === 'atk_bair') ||
+          (dir === 'upair' && this.moveState.type === 'atk_uair') ||
+          dir === 'dair'
+        );
+        if (canChain && !chainBlock) {
+          this.moveState = null;
+          this.attackCooldown = 0;
+          this.aerialChain.count++;
+          this.startAttack(dir);
+        } else if (!this.moveState && this.attackCooldown <= 0) {
+          this.startAttack(dir);
+        }
       }
     }
 
@@ -932,9 +974,22 @@
       }
       // Apply per-character flavor — character-specific tweaks to certain attacks.
       this.applyAttackFlavor();
+      // Aerial-chain damage decay: 2nd hit = 80%, 3rd = 60%, 4th = 40%, etc.
+      // Floor at 40% so the 4th+ hit still feels like it counts.
+      if (!this.onGround && this.aerialChain.count > 0 && this.moveState && this.moveState.dmg != null) {
+        const mult = Math.max(0.4, 1 - this.aerialChain.count * 0.2);
+        this.moveState.dmg *= mult;
+      }
     }
 
     // Per-character overrides on basic attacks. Mutates this.moveState in place
+    // Per-character aerial chain cap. Heavies chain less; fliers chain more.
+    aerialChainCap() {
+      if (this.key === 'jonah') return 5;          // flier — can really stack
+      if (this.key === 'kele' || this.key === 'drew' || this.key === 'donny') return 2;
+      return 3; // default
+    }
+
     // and may also queue projectile spawns for projectile-style basic attacks.
     // Each entry leans into the character's identity (zoner / spike / heavy / etc).
     applyAttackFlavor() {
@@ -2116,6 +2171,67 @@
             this.attackCooldown = 18;
           }
         }
+        // Shield-grab: grabber holds victim, then on release-or-direction
+        // applies the appropriate throw. Victim can mash to break free early.
+        if (this.moveState && this.moveState.type === 'shieldGrab' && this.moveState.held) {
+          const m = this.moveState;
+          const victim = m.held;
+          m.holdTimer++;
+          // Pin victim in front of grabber
+          victim.vx = 0; victim.vy = 0;
+          victim.x = this.x + this.facing * 22;
+          victim.y = this.y + 2;
+          victim.hitstun = 4;
+          victim.blocking = false;
+          // Mash escape: defender mashes any direction or attack/special.
+          // ~28 mashes within the 60-frame window = free break-out.
+          const vctrl = controls[victim.index];
+          const mashAny = frameKeys[vctrl.left] || frameKeys[vctrl.right] ||
+                         frameKeys[vctrl.up] || frameKeys[vctrl.down] ||
+                         frameKeys[vctrl.attack] || frameKeys[vctrl.special];
+          if (mashAny && !victim.prevMashAny) m.mashes = (m.mashes || 0) + 1;
+          victim.prevMashAny = mashAny;
+          // Throw release: grabber releases attack, mashes out, or hold caps.
+          const gctrl = controls[this.index];
+          const grabberAttack = frameKeys[gctrl.attack];
+          const throwTrigger = (m.holdTimer >= 6 && !grabberAttack) ||
+                                m.holdTimer >= 60;
+          if (m.mashes >= 28) {
+            // Mash break — victim escapes with a tiny pop, no throw applied.
+            spawnEffect(victim.cx, victim.cy, '#88ddff', 20, 28);
+            victim.invuln = 12;
+            m.held = null;
+            m.grabbed = null;
+            this.moveState = null;
+            this.attackCooldown = 14;
+          } else if (throwTrigger) {
+            // Read direction at moment of throw for the variant.
+            const left = frameKeys[gctrl.left];
+            const right = frameKeys[gctrl.right];
+            const up = frameKeys[gctrl.up];
+            const downIn = frameKeys[gctrl.down];
+            const f = this.facing;
+            let dmg, kbx, kby, kind;
+            if (up) { dmg = 7; kbx = 0; kby = -13; kind = 'up'; }
+            else if (downIn) { dmg = 6; kbx = f * 1; kby = 6; kind = 'down'; }
+            else if ((left && f === 1) || (right && f === -1)) {
+              // Back throw — KO power, opposite of facing
+              dmg = 10; kbx = -f * 9; kby = -5; kind = 'back';
+            } else {
+              // Forward throw — default; horizontal launch in facing dir
+              dmg = 8; kbx = f * 8; kby = -4; kind = 'forward';
+            }
+            victim.takeDamage(dmg, kbx, kby, this);
+            playSound(dmg >= 10 ? 'hitHeavy' : 'hitMedium');
+            hitstopFrames = Math.max(hitstopFrames, 3);
+            spawnEffect(victim.cx, victim.cy, '#ffeb3b', 22, 26);
+            m.held = null;
+            m.grabbed = null;
+            this.moveState = null;
+            this.attackCooldown = 14;
+            this.endlag = 12;
+          }
+        }
         // Jonah: Beet Snatch windup — small dash visual until grab connects
         if (this.moveState && this.moveState.type === 'beetSnatch' && !this.moveState.grabbed) {
           if (Math.random() < 0.3) spawnEffect(this.cx + this.facing * 14, this.cy, '#e070b0', 12, 8);
@@ -2485,6 +2601,8 @@
       if (grounded && !this.onGround) {
         this.jumps = 0;
         this.helpless = false;
+        this.aerialChain.count = 0;     // chain resets when feet touch dirt
+        playSound('land');
         // Squash on landing — heavier squash if we'd been airborne for a while
         this.squashTimer = Math.min(12, 6 + Math.floor(this.airTime / 12));
         spawnEffect(this.cx, this.y + this.h, '#ffffff', 8, 10);
@@ -2605,6 +2723,7 @@
       this.shieldBroken = 0;
       this.hasPole = true; // Liam respawns with his pole back
       this.shieldOut = false; // Drew respawns with shield in hand
+      this.aerialChain.count = 0;
     }
 
     // Melee attack hitbox (for burn dash, katana slash, regular attacks)
@@ -2754,6 +2873,16 @@
         return { x: this.facing === 1 ? this.x + this.w - 4 : this.x - 36,
                  y: this.y + 6, w: 40, h: this.h - 12,
                  damage: 0, kbx: 0, kby: 0, type: 'grab', grab: true, powerGrab: true };
+      }
+      // Shield-grab: short close-range grab box, only during the active window
+      // and only while no victim is held yet.
+      if (t === 'shieldGrab' && !this.moveState.held) {
+        const elapsed = 16 - this.moveState.timer;
+        const [a, b] = this.moveState.active;
+        if (elapsed < a || elapsed > b) return null;
+        return { x: this.facing === 1 ? this.x + this.w - 2 : this.x - 30,
+                 y: this.y + 8, w: 32, h: this.h - 14,
+                 damage: 0, kbx: 0, kby: 0, type: 'grab', grab: true, shieldGrab: true };
       }
       // Donny: Ultimate Upper — wide rising uppercut, low dmg + huge vertical KB
       if (t === 'ultUpper') {
@@ -6463,7 +6592,16 @@
               def.blockCooldown = 30;
             }
             atk.moveState.grabbed = def;
-            if (hb.suplex) {
+            // Shield-grab routes through its own held/throw state:
+            // grabber holds victim, throw fires when grabber's attack is
+            // released or held timer caps out.
+            if (hb.shieldGrab) {
+              atk.moveState.held = def;
+              atk.moveState.holdTimer = 0;
+              atk.moveState.mashes = 0;
+              atk.moveState.timer = 60; // 1s held cap
+              spawnEffect(def.cx, def.cy, '#88ddff', 20, 26);
+            } else if (hb.suplex) {
               // Start suplex sequence
               atk.moveState.phase = 'lift';
               atk.moveState.phaseTimer = 0;
@@ -6541,7 +6679,7 @@
           if (atk.moveState && atk.moveState.type && atk.moveState.type.startsWith('atk_')) {
             atk.moveState.hasHit = atk.moveState.hasHit || new Set();
             atk.moveState.hasHit.add(def);
-          } else if (atk.moveState && ['toxPunch','hardPunch','powerPunch','uppercut','bodySlam','ultraSpike','powerBlast','hammerBonk','jumpShot','powerPunchD','dropkick','ultUpper','rushSword','shieldRide','shieldSpike','dragonClaw','lightningJump','sing'].includes(atk.moveState.type)) { /* unchanged */
+          } else if (atk.moveState && ['toxPunch','hardPunch','powerPunch','uppercut','bodySlam','ultraSpike','powerBlast','hammerBonk','jumpShot','powerPunchD','dropkick','ultUpper','rushSword','shieldRide','shieldSpike','dragonClaw','lightningJump','sing','shieldGrab'].includes(atk.moveState.type)) { /* unchanged */
             atk.moveState.hasHit = atk.moveState.hasHit || new Set();
             atk.moveState.hasHit.add(def);
           } else {
