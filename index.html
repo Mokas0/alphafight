@@ -37,6 +37,12 @@
   window.addEventListener('keydown', e => {
     keys[e.code] = true;
     keyPressLatch[e.code] = true;
+    // Lazy-init audio on first user gesture (browser autoplay policy)
+    if (typeof ensureAudio === 'function') ensureAudio();
+    // M toggles mute
+    if (e.code === 'KeyM' && typeof audioEnabled !== 'undefined' && !e.repeat) {
+      audioEnabled = !audioEnabled;
+    }
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
   });
   window.addEventListener('keyup', e => { keys[e.code] = false; });
@@ -483,13 +489,99 @@
     }
   }
 
+  // ---------- SOUND ----------
+  // Procedural 8-bit-style sound system. No asset files — every effect is
+  // synthesized from oscillators + noise on the fly via WebAudio. Browsers
+  // require user interaction before audio plays, so the AudioContext is
+  // lazy-initialized on the first input event. Mute toggle on key M.
+  let audioCtx = null;
+  let audioEnabled = true;
+  let audioReady = false;
+  function ensureAudio() {
+    if (audioCtx) return;
+    try {
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      audioReady = true;
+    } catch (e) { audioReady = false; }
+  }
+  function noiseBuffer(durationSec) {
+    if (!audioCtx) return null;
+    const len = Math.floor(audioCtx.sampleRate * durationSec);
+    const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1);
+    return buf;
+  }
+  function tone({ freq, freqEnd, type = 'square', dur = 0.1, vol = 0.15, attack = 0.005, release = 0.05 }) {
+    if (!audioReady || !audioEnabled) return;
+    const t0 = audioCtx.currentTime;
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, t0);
+    if (freqEnd != null) osc.frequency.linearRampToValueAtTime(freqEnd, t0 + dur);
+    gain.gain.setValueAtTime(0, t0);
+    gain.gain.linearRampToValueAtTime(vol, t0 + attack);
+    gain.gain.linearRampToValueAtTime(0, t0 + dur + release);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t0);
+    osc.stop(t0 + dur + release + 0.02);
+  }
+  function noise({ dur = 0.1, vol = 0.12, lowpass = null, highpass = null }) {
+    if (!audioReady || !audioEnabled) return;
+    const t0 = audioCtx.currentTime;
+    const src = audioCtx.createBufferSource();
+    src.buffer = noiseBuffer(dur);
+    const gain = audioCtx.createGain();
+    gain.gain.setValueAtTime(vol, t0);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    let chain = src;
+    if (lowpass != null) {
+      const lp = audioCtx.createBiquadFilter();
+      lp.type = 'lowpass'; lp.frequency.value = lowpass;
+      chain.connect(lp); chain = lp;
+    }
+    if (highpass != null) {
+      const hp = audioCtx.createBiquadFilter();
+      hp.type = 'highpass'; hp.frequency.value = highpass;
+      chain.connect(hp); chain = hp;
+    }
+    chain.connect(gain).connect(audioCtx.destination);
+    src.start(t0);
+    src.stop(t0 + dur);
+  }
+  const SOUNDS = {
+    jump:        () => tone({ freq: 240, freqEnd: 480, type: 'square', dur: 0.08, vol: 0.10 }),
+    land:        () => noise({ dur: 0.06, vol: 0.10, lowpass: 800 }),
+    hitLight:    () => { tone({ freq: 380, freqEnd: 220, type: 'square', dur: 0.07, vol: 0.14 }); noise({ dur: 0.04, vol: 0.06, highpass: 800 }); },
+    hitMedium:   () => { tone({ freq: 260, freqEnd: 130, type: 'square', dur: 0.10, vol: 0.18 }); noise({ dur: 0.06, vol: 0.10 }); },
+    hitHeavy:    () => { tone({ freq: 180, freqEnd: 60,  type: 'sawtooth', dur: 0.16, vol: 0.22 }); noise({ dur: 0.10, vol: 0.16, lowpass: 600 }); },
+    ko:          () => { tone({ freq: 800, freqEnd: 80,  type: 'sawtooth', dur: 0.45, vol: 0.22 }); noise({ dur: 0.30, vol: 0.18 }); },
+    block:       () => tone({ freq: 600, freqEnd: 480, type: 'triangle', dur: 0.06, vol: 0.10 }),
+    parry:       () => { tone({ freq: 1200, freqEnd: 1800, type: 'sine', dur: 0.12, vol: 0.16 }); tone({ freq: 1800, freqEnd: 2400, type: 'sine', dur: 0.18, vol: 0.10 }); },
+    shieldBreak: () => { tone({ freq: 400, freqEnd: 60,  type: 'square', dur: 0.30, vol: 0.20 }); noise({ dur: 0.25, vol: 0.18, highpass: 1500 }); },
+    menuBlip:    () => tone({ freq: 880, type: 'square', dur: 0.04, vol: 0.10 }),
+    menuConfirm: () => { tone({ freq: 660, type: 'square', dur: 0.06, vol: 0.12 }); setTimeout(() => tone({ freq: 990, type: 'square', dur: 0.08, vol: 0.12 }), 60); },
+    whoosh:      () => noise({ dur: 0.08, vol: 0.08, highpass: 1200 }),
+    fireball:    () => { tone({ freq: 90, type: 'sawtooth', dur: 0.18, vol: 0.10 }); noise({ dur: 0.12, vol: 0.08, lowpass: 400 }); },
+    explode:     () => { tone({ freq: 80, freqEnd: 30, type: 'sawtooth', dur: 0.30, vol: 0.20 }); noise({ dur: 0.30, vol: 0.22, lowpass: 1200 }); },
+    sing:        () => { tone({ freq: 440, type: 'sine', dur: 0.20, vol: 0.10 }); tone({ freq: 660, type: 'sine', dur: 0.20, vol: 0.08 }); tone({ freq: 880, type: 'sine', dur: 0.20, vol: 0.06 }); },
+    win:         () => { tone({ freq: 523, type: 'square', dur: 0.12, vol: 0.16 }); setTimeout(() => tone({ freq: 659, type: 'square', dur: 0.12, vol: 0.16 }), 130); setTimeout(() => tone({ freq: 784, type: 'square', dur: 0.20, vol: 0.18 }), 270); },
+    thatsGame:   () => { tone({ freq: 220, freqEnd: 110, type: 'sawtooth', dur: 0.50, vol: 0.20 }); noise({ dur: 0.40, vol: 0.14, lowpass: 800 }); },
+  };
+  function playSound(name) {
+    ensureAudio();
+    const fn = SOUNDS[name];
+    if (fn) try { fn(); } catch (e) {}
+  }
+
   // ---------- PARRY ----------
-  // Hit-stop pauses sim ticking for a few frames after a parry; flash drives
-  // the on-screen "PARRIED!" overlay (ticks during render, not sim, so it
-  // animates while the simulation is frozen).
+  // Hit-stop pauses sim ticking for a few frames; drives both parry freezes
+  // AND heavy-hit pause (a 2-4 frame freeze on big damage). Flash drives the
+  // "PARRIED!" overlay during render so it animates while sim is frozen.
   let hitstopFrames = 0;
   let parryFlashFrames = 0;
-  let parryFlashWho = null; // fighter object that pulled off the parry
+  let parryFlashWho = null;
 
   function triggerParry(defender, attacker) {
     hitstopFrames = 24;        // ~0.4s freeze for impact
@@ -512,6 +604,7 @@
     spawnEffect(defender.cx, defender.cy, '#ffffff', 36, 80);
     spawnEffect(defender.cx, defender.cy, '#ffe14a', 28, 70);
     spawnEffect(attacker.cx, attacker.cy, '#ff6a2a', 24, 50);
+    playSound('parry');
   }
 
   // ---------- PLAYER CLASS ----------
@@ -643,11 +736,13 @@
           this.blocking = false;
           this.hitstun = 90;
           this.vy = -6;
+          playSound('shieldBreak');
           spawnEffect(this.cx, this.cy, '#ff4444', 36, 60);
           spawnEffect(this.cx, this.cy, '#ffeb3b', 30, 70);
           spawnEffect(this.cx, this.cy, '#88ddff', 24, 80);
         } else {
           spawnEffect(this.cx, this.cy, '#88ddff', 16, 20);
+          playSound('block');
         }
         return true;
       }
@@ -732,6 +827,7 @@
             this.jumps++;
             this.onGround = false;
             spawnEffect(this.cx, this.y + this.h, '#ffffff', 10, 14);
+            playSound('jump');
           }
 
           // Fast fall
@@ -2448,6 +2544,7 @@
                       this.y + this.h < BLAST_TOP);
       const fellDown = (this.y > BLAST_BOTTOM) && (currentStage !== 'lavaLake');
       if (fellOff || fellDown) {
+        playSound('ko');
         this.die();
       }
     }
@@ -6411,6 +6508,15 @@
             break;
           }
           def.takeDamage(hb.damage, hb.kbx, hb.kby, atk);
+          // Sound + hit-pause feedback. Pause scales with damage so heavies
+          // get the meaty Smash-style freeze. Skip if a parry/sing already
+          // populated hitstop (don't double-add).
+          if (!hb.stun && !hb.grab) {
+            const dmg = hb.damage || 0;
+            if (dmg >= 14) { playSound('hitHeavy'); hitstopFrames = Math.max(hitstopFrames, 4); }
+            else if (dmg >= 8) { playSound('hitMedium'); hitstopFrames = Math.max(hitstopFrames, 2); }
+            else if (dmg > 0) { playSound('hitLight'); }
+          }
           if (hb.poison) {
             def.applyPoison(90);
             spawnEffect(def.cx, def.cy, '#5aaf3a', 20, 28);
@@ -6429,6 +6535,7 @@
             def.hitstun = Math.max(def.hitstun, hb.stun);
             spawnEffect(def.cx, def.cy - 14, '#ff6abf', 22, 60);
             spawnEffect(def.cx, def.cy - 14, '#ffe14a', 16, 60);
+            playSound('sing');
           }
           // Track already-hit for multi-frame hitboxes
           if (atk.moveState && atk.moveState.type && atk.moveState.type.startsWith('atk_')) {
@@ -7527,7 +7634,11 @@
   function updateMenu() {
     const c0 = controls[0];
     const c1 = controls[1];
-    const tap = (code) => isHeld(code) && !menuPrevKeys[code];
+    const tap = (code) => {
+      const t = isHeld(code) && !menuPrevKeys[code];
+      if (t) playSound('menuBlip');
+      return t;
+    };
 
     if (menuStage === 'mode') {
       // P1 cycles between the 4 mode buttons with left/right, confirms with special.
@@ -8979,6 +9090,7 @@
       endgame.phase = 'finalKO';
       endgame.timer = 0;
       endgame.slowMoCount = 0;
+      playSound('thatsGame');
     }
     // (consumeKeyLatch is called by captureLocalInputBits / snapshotInputsLocal
     //  when an input is actually read into a slot, NOT here. If it fired here,
@@ -9031,6 +9143,7 @@
         if (endgame.timer >= 90) {        // ~1.5s of slow-mo + flash
           endgame.phase = 'winAnim';
           endgame.timer = 0;
+          playSound('win');
         }
       } else if (endgame.phase === 'winAnim') {
         drawWinTaunt(winner, endgame.timer);
