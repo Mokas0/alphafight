@@ -15,8 +15,8 @@
   <h1>ALPHA <span>BRAWL</span></h1>
   <canvas id="game" width="960" height="540"></canvas>
   <div id="hud">
-    <b style="color:#ff6a2a">P1 (Nico / Derek)</b>: <span class="key">WASD</span> move/jump &nbsp; <span class="key">L-Shift</span> block &nbsp; <span class="key">R</span> attack (+direction for tilts/aerials) &nbsp; <span class="key">F</span> special (+direction)<br>
-    <b style="color:#4ab8ff">P2 (Nico / Derek)</b>: <span class="key">Arrows</span> move/jump &nbsp; <span class="key">R-Shift</span> block &nbsp; <span class="key">K</span> attack (+direction) &nbsp; <span class="key">L</span> special (+direction)<br>
+    <b style="color:#ff6a2a">P1</b>: <span class="key">WASD</span> move/jump &nbsp; <span class="key">L-Shift</span> block &nbsp; <span class="key">F</span> attack (+direction for tilts/aerials) &nbsp; <span class="key">G</span> special (+direction)<br>
+    <b style="color:#4ab8ff">P2</b>: <span class="key">Arrows</span> move/jump &nbsp; <span class="key">R-Shift</span> block &nbsp; <span class="key">.</span> attack (+direction) &nbsp; <span class="key">/</span> special (+direction)<br>
     Character select on title screen. Press <span class="key">Enter</span> to start / restart. First to knock the other off 3 times wins.
   </div>
 </div>
@@ -390,8 +390,8 @@
 
   // ---------- CONTROL MAPS ----------
   const controls = [
-    { left:'KeyA', right:'KeyD', up:'KeyW', down:'KeyS', block:'ShiftLeft', special:'KeyF', attack:'KeyR' },
-    { left:'ArrowLeft', right:'ArrowRight', up:'ArrowUp', down:'ArrowDown', block:'ShiftRight', special:'KeyL', attack:'KeyK' },
+    { left:'KeyA', right:'KeyD', up:'KeyW', down:'KeyS', block:'ShiftLeft', special:'KeyG', attack:'KeyF' },
+    { left:'ArrowLeft', right:'ArrowRight', up:'ArrowUp', down:'ArrowDown', block:'ShiftRight', special:'Slash', attack:'Period' },
   ];
 
   // ---------- PROJECTILES & EFFECTS ----------
@@ -5561,7 +5561,7 @@
     consumeKeyLatch();
   }
   // Capture the local player's inputs as a 7-bit mask for sending over the wire.
-  // In online mode the local keyboard always uses the P1 scheme (WASD / LShift / F / R)
+  // In online mode the local keyboard always uses the P1 scheme (WASD / LShift / F / G)
   // regardless of whether this client owns fighter index 0 or 1 — the network layer
   // routes the mask to the correct fighter via applyInputBitsToFrame.
   function captureLocalInputBits() {
@@ -7837,7 +7837,7 @@
       }
     } else if (menuStage === 'chars') {
       // Local 2P: each player uses their own control scheme.
-      // Online: the local player always uses the P1 scheme (WASD/LShift/F/R)
+      // Online: the local player always uses the P1 scheme (WASD/LShift/F/G)
       // regardless of which fighter index they own. (fighterIdx, keyboardCtrl) pairs.
       const pickers = (net.mode === 'local')
         ? [{ fighterIdx: 0, ctrl: controls[0] }, { fighterIdx: 1, ctrl: controls[1] }]
@@ -8250,7 +8250,7 @@
       }
       ctx.fillStyle = '#888';
       ctx.font = '12px sans-serif';
-      ctx.fillText('P1: A/D cycle, F confirm', W/2, H - 60);
+      ctx.fillText('P1: A/D cycle, G confirm', W/2, H - 60);
       ctx.fillText('Online play needs the page hosted on a real URL (Netlify Drop / GitHub Pages).', W/2, H - 38);
       ctx.textAlign = 'left';
       return;
@@ -8263,7 +8263,7 @@
       ctx.fillText('PICK A STADIUM', W/2, 100);
       ctx.fillStyle = '#aaa';
       ctx.font = '13px sans-serif';
-      ctx.fillText('A/D to cycle  ·  F to confirm  ·  L-Shift to go back', W/2, 124);
+      ctx.fillText('A/D to cycle  ·  G to confirm  ·  L-Shift to go back', W/2, 124);
 
       // 4 stadium cards in a row
       const cardW = 200, cardH = 200, gap = 20;
@@ -8340,7 +8340,7 @@
       ctx.fillText('MOVESET KEY', W/2, 130);
       ctx.fillStyle = '#888';
       ctx.font = '12px sans-serif';
-      ctx.fillText('Special button (F or L) + direction → fires the corresponding special.', W/2, 152);
+      ctx.fillText('Special button (G or /) + direction → fires the corresponding special.', W/2, 152);
 
       // Character rows
       ctx.textAlign = 'left';
@@ -8702,11 +8702,11 @@
     ctx.fillStyle = '#aaa';
     ctx.font = '11px sans-serif';
     if (net.mode === 'local') {
-      ctx.fillText('P1: A/D cycle, F confirm, L-Shift cancel      P2: ←/→ cycle, L confirm, R-Shift cancel', W/2, H - 55);
+      ctx.fillText('P1: A/D cycle, G confirm, L-Shift cancel      P2: ←/→ cycle, / confirm, R-Shift cancel', W/2, H - 55);
     } else if (net.mode === 'host') {
-      ctx.fillText('A/D cycle, F confirm, L-Shift cancel      Share the room code with a friend', W/2, H - 55);
+      ctx.fillText('A/D cycle, G confirm, L-Shift cancel      Share the room code with a friend', W/2, H - 55);
     } else {
-      ctx.fillText('A/D cycle, F confirm, L-Shift cancel      Connecting to host...', W/2, H - 55);
+      ctx.fillText('A/D cycle, G confirm, L-Shift cancel      Connecting to host...', W/2, H - 55);
     }
     let ready = false, label = 'Both players must confirm';
     if (net.mode === 'local') {

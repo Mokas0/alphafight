@@ -19,7 +19,7 @@ on your end), with deterministic lockstep netcode and a 3-frame input delay buff
 - **Host**: pick HOST, confirm your fighter, share the 6-char room code with a friend.
 - **Join**: pick JOIN, type the 6-char code, confirm your fighter. The host then presses
   ENTER to start the match.
-- **Controls (online, both sides)**: WASD move/jump, `L-Shift` block, `R` attack, `F` special.
+- **Controls (online, both sides)**: WASD move/jump, `L-Shift` block, `F` attack, `G` special.
   Both host and guest use the P1 scheme on their physical keyboard regardless of which
   fighter index they own — the netcode routes inputs to the correct fighter on each client.
 - **ESC** in any state returns to the main menu and tears down the connection.
@@ -45,8 +45,8 @@ or push to a GitHub repo and enable GitHub Pages (Settings → Pages → Deploy 
 |--------|----------|----------|
 | Move / aim | `WASD` | `Arrow keys` |
 | Block | `Left Shift` | `Right Shift` |
-| Attack | `R` | `K` |
-| Special | `F` | `L` |
+| Attack | `F` | `.` (period) |
+| Special | `G` | `/` (slash) |
 | Confirm/start | `Enter` | `Enter` |
 
 Specials and attacks both take a directional modifier. Hold a direction *before* pressing
