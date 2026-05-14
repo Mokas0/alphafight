@@ -296,6 +296,34 @@ and make sure the filename is exactly `index.html` — not `index (1).html`).
 - Shield drain/regen rates and break-stun duration are in the block-handling section
   of `Fighter.update()`.
 
+## Changelog
+
+### Update 1.1
+
+**Jonah — fall speed decreased**
+- Gravity: 0.38 → 0.30
+- Terminal fall velocity: 9 → 7
+
+Jonah is now meaningfully floatier. Recoveries reach farther, and he's harder
+to combo or knock out of the air. The trade-off is the same as before: he's
+still the lightest fighter (0.75 weight) and dies early to clean hits.
+
+**Kele — King K. Rool-style super armor on more attacks**
+Kele already had a 14-frame super-armor windup on Power Punch. Two more of his
+specials now carry super armor on commitment frames:
+
+- **Suplex (side-special):** 12 frames of super armor on the startup. Light
+  jabs no longer break Kele out of his grab — you have to space him out or
+  hit him hard.
+- **Body Slam (down-special):** 18 frames of super armor on the launch +
+  drop. Projectiles and weak air hits can't knock him out of the plunge once
+  he commits.
+
+Uppercut keeps its existing 6-frame windup invuln. The intent: any "big,
+slow, committed" Kele move now plays through the chip damage. He still loses
+to clean reads, spacing, and grabs — but he can no longer be poked out of
+a slam.
+
 ## Credits
 
 Designed and built collaboratively. Implementation in a single-session iterative process

@@ -1327,19 +1327,23 @@
       } else if (dir === 'side') {
         // Suplex — Mii Brawler-style command grab. Pierces shields, huge damage
         // when it lands, whiff punishable. Requires close range.
+        // Update 1.1: super armor on the startup so jabs can't break the grab.
         this.moveState = {
           type: 'suplex', timer: 32, active: [6, 16],
           grabbed: null, phase: 'reach', // reach → lift → slam
           phaseTimer: 0,
         };
+        this.invuln = 12;
         this.vx = this.facing * 2;
       } else if (dir === 'down') {
         // Body Slam — dash downward fast; final impact frame deals heavy damage.
         // In the air: immediate plunge. On the ground: a short leap up then slam down.
+        // Update 1.1: super armor on the launch + drop — light hits can't knock him out of the plunge.
         this.moveState = {
           type: 'bodySlam', timer: 44, phase: 'launch',
           hasHit: null,
         };
+        this.invuln = 18;
         if (this.onGround) {
           // Jump up first so the slam has vertical space
           this.vy = -11;
@@ -2070,8 +2074,8 @@
       }
 
       // Gravity — Jonah falls much slower (floaty)
-      const gravity = (this.key === 'jonah') ? 0.38 : 0.65;
-      const terminalVy = (this.key === 'jonah') ? 9 : 14;
+      const gravity = (this.key === 'jonah') ? 0.30 : 0.65;
+      const terminalVy = (this.key === 'jonah') ? 7 : 14;
       this.vy += gravity;
       if (this.vy > terminalVy) this.vy = terminalVy;
 
