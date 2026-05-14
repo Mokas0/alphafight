@@ -300,6 +300,19 @@ and make sure the filename is exactly `index.html` — not `index (1).html`).
 
 ### Update 1.1
 
+**Super armor — breakable now**
+Heavy commit moves (Kele's specials, Greyson's Mega Jump, Donny's Power Punch)
+no longer grant pure invincibility on their armor windows. Instead:
+
+- Hits ≤ 20 dmg are absorbed — no damage, no flinch (yellow flash + block sfx).
+- Hits > 20 dmg **break** the armor: the fighter takes full damage and is
+  stunned for 60 frames (shield-break style). The move is canceled mid-swing.
+
+The threshold is set so that most jab / fast-aerial damage bounces, but
+heavy committed swings (Kele Power Punch 20, Donny Power Punch ~25+,
+Drew Shield Spike spike, Aidan Hammer Bonk 14 if charged, charged Orb,
+Pool Ball, etc.) can punch through.
+
 **Jonah — fall speed decreased**
 - Gravity: 0.38 → 0.30
 - Terminal fall velocity: 9 → 7
@@ -309,20 +322,55 @@ to combo or knock out of the air. The trade-off is the same as before: he's
 still the lightest fighter (0.75 weight) and dies early to clean hits.
 
 **Kele — King K. Rool-style super armor on more attacks**
-Kele already had a 14-frame super-armor windup on Power Punch. Two more of his
-specials now carry super armor on commitment frames:
+Kele already had a super-armor windup on Power Punch. Three more of his
+specials now carry (breakable) armor on commitment frames:
 
-- **Suplex (side-special):** 12 frames of super armor on the startup. Light
-  jabs no longer break Kele out of his grab — you have to space him out or
-  hit him hard.
-- **Body Slam (down-special):** 18 frames of super armor on the launch +
-  drop. Projectiles and weak air hits can't knock him out of the plunge once
-  he commits.
+- **Power Punch (neutral):** 14 frames of armor — windup. Unchanged duration.
+- **Uppercut (up):** 6 frames of armor — startup. Was iframes before; same value,
+  now goes through the >20-dmg break rule.
+- **Suplex (side):** 12 frames of armor on the startup. Light jabs no longer
+  break Kele out of his grab.
+- **Body Slam (down):** 18 frames of armor on the launch + drop. Projectiles
+  and weak air hits can't knock him out of the plunge once he commits.
 
-Uppercut keeps its existing 6-frame windup invuln. The intent: any "big,
-slow, committed" Kele move now plays through the chip damage. He still loses
-to clean reads, spacing, and grabs — but he can no longer be poked out of
-a slam.
+He still loses to clean reads, spacing, grabs, and now any single hit
+over 20 dmg.
+
+**Drew — Side-special is now Shield Bash**
+The Rushing Sword forward dash is replaced with a short-range Shield Bash:
+
+- Forward velocity: 13 → 6 (less than half — Drew is no longer flying across
+  the stage)
+- Move duration: 22 → 16 frames
+- Active hitbox: tighter and closer to Drew's body (54×30 reach → 36×32 chunk)
+- Damage / KB unchanged
+- Same 4-frame startup invuln
+
+The move now plays as a punchy point-blank smash with a shield instead of a
+lunging sword swipe.
+
+**Angus — passive code regen**
+Angus's code meter now ticks up automatically: +0.15 per frame (~9 / sec, full
+from empty in ~11 seconds). He still gets the big damage-based and Code Farm
+boosts on top — but he's no longer dead in the water if the opponent refuses
+to hit him. Regen pauses while channeling Code Farm.
+
+**Derek — Shuriken is now a three-shuriken spread**
+Neutral special throws three shuriken in a vertical spray instead of one:
+center shuriken flies straight, upper and lower shuriken angled ±1.6 px/frame.
+Same per-shuriken damage (6) and KB. Whiffed shots still get the full Derek
+zoner pressure; up close, all three can connect for big chip.
+
+**Stage — horizontal offstage area widened a LOT**
+Previously fighters had 300 px between the stage edge and the blastzone. Now
+they have 700 px on each side (over double).
+
+- `WORLD_W`: 1800 → 2200
+- `BLAST_LEFT`: 100 → -300
+- `BLAST_RIGHT`: 1700 → 2100 (still `WORLD_W - 100`)
+
+Recoveries are much more forgiving. Edgeguards are still possible but require
+chasing further off-stage. Stage and ledge positions are unchanged.
 
 ## Credits
 

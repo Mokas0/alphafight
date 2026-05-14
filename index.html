@@ -66,14 +66,15 @@
   // ---------- STAGE ----------
   // World coordinates are much bigger than the viewport so fighters can go offstage.
   // The main platform is centered in the world; everything outside is a blastzone.
-  const WORLD_W = 1800;
+  // Update 1.1: horizontal offstage area widened a lot — was 300 px each side, now 700 px each side.
+  const WORLD_W = 2200;
   const WORLD_H = 1200;
   const STAGE_LEFT = 400;     // main platform left edge
   const STAGE_RIGHT = 1400;   // main platform right edge
   const STAGE_TOP = 700;      // main platform top surface
   const GROUND_Y = STAGE_TOP;
   // Blastzones: crossing any of these kills the fighter
-  const BLAST_LEFT = 100;
+  const BLAST_LEFT = -300;
   const BLAST_RIGHT = WORLD_W - 100;
   const BLAST_TOP = 100;
   const BLAST_BOTTOM = WORLD_H - 80;
@@ -669,6 +670,11 @@
       this.moveState = null; // { type, timer, ... }
       this.attackCooldown = 0;
       this.invuln = 0;
+      // Super armor (Update 1.1) — set by heavy commit moves (Kele's Power Punch /
+      // Suplex / Body Slam / Uppercut, Greyson's Mega Jump, Donny's Power Punch).
+      // Hits ≤ 20 dmg are absorbed (no damage, no flinch). Hits > 20 dmg BREAK
+      // the armor: take the hit and get stunned.
+      this.armor = 0;
       this.counterActive = 0; // frames where down-special counters
       this.counterCooldown = 0;
       this.endlag = 0;        // recovery frames after a committed move — locks inputs
@@ -723,6 +729,27 @@
         this.parryWindow = 0;
         triggerParry(this, attacker);
         return true;
+      }
+      // SUPER ARMOR (Update 1.1) — heavy commit moves grant armor on their
+      // windup / drop. Light hits bounce off; a hit > 20 dmg breaks the armor
+      // and stuns the fighter (60-frame shieldBroken + hitstun), then falls
+      // through to apply the damage normally.
+      if (this.armor > 0) {
+        if (amount <= 20) {
+          spawnEffect(this.cx, this.cy, '#f0d050', 18, 30);
+          spawnEffect(this.cx, this.cy, '#ffffff', 12, 24);
+          playSound('block');
+          return true;
+        }
+        this.armor = 0;
+        this.shieldBroken = 60;
+        this.hitstun = 60;
+        this.moveState = null;
+        spawnEffect(this.cx, this.cy, '#ff4444', 32, 70);
+        spawnEffect(this.cx, this.cy, '#ffeb3b', 26, 80);
+        spawnEffect(this.cx, this.cy, '#ffffff', 20, 90);
+        playSound('shieldBreak');
+        // fall through — armor break still eats the damage and KB
       }
       // Block reduces damage and KB, but DRAINS the shield (more for bigger
       // hits). When shield runs out the fighter is shield-broken: long stun,
@@ -1157,15 +1184,18 @@
     // --- DEREK SPECIALS ---
     derekSpecial(dir) {
       if (dir === 'neutral') {
-        // Shuriken
+        // Shuriken — Update 1.1: throws three in a spread instead of one.
+        // Center shuriken flies straight; flanking pair angled ±9° vertically.
         this.moveState = { type: 'shuriken', timer: 16 };
         delaySpawn(5, () => {
-          projectiles.push({
-            owner: this, x: this.cx + this.facing * 24, y: this.cy - 4,
-            vx: this.facing * 10, vy: 0, w: 14, h: 14,
-            life: 55, damage: 6, kbx: this.facing * 3, kby: -2,
-            type: 'shuriken', gravity: 0, spin: 0
-          });
+          for (let i = -1; i <= 1; i++) {
+            projectiles.push({
+              owner: this, x: this.cx + this.facing * 24, y: this.cy - 4,
+              vx: this.facing * 10, vy: i * 1.6, w: 14, h: 14,
+              life: 55, damage: 6, kbx: this.facing * 3, kby: -2,
+              type: 'shuriken', gravity: 0, spin: 0
+            });
+          }
         });
       } else if (dir === 'up') {
         // Katana upward dash
@@ -1273,13 +1303,14 @@
           });
         });
       } else if (dir === 'up') {
-        // Mega Jump — huge vertical launch, grants an extra jump, short superarmor
+        // Mega Jump — huge vertical launch, grants an extra jump, short super armor.
+        // Update 1.1: armor instead of invuln; >20 dmg breaks it.
         this.moveState = { type: 'megaJump', timer: 28 };
         this.vy = -19;
         this.vx = this.facing * 2.5;
         this.jumps = 1; // reset to allow a follow-up double jump
         this.maxJumps = 2;
-        this.invuln = 10;
+        this.armor = 10;
         spawnEffect(this.cx, this.y + this.h, '#d4c77a', 26, 36);
         spawnEffect(this.cx, this.y + this.h + 6, '#6a7a4a', 22, 30);
       } else if (dir === 'side') {
@@ -1305,17 +1336,18 @@
     keleSpecial(dir) {
       if (dir === 'neutral') {
         // Power Punch — heaviest single hit, biggest knockback in the game.
-        // Long startup, long endlag. Super-armor during the windup to punch through jabs.
+        // Long startup, long endlag. Super armor during the windup to punch through jabs.
+        // Update 1.1: armor instead of invuln; >20 dmg hits break it.
         this.moveState = {
           type: 'powerPunch', timer: 36, active: [14, 22],
           hasHit: null,
         };
-        // Super-armor for the windup window
-        this.invuln = 14;
+        this.armor = 14;
         this.vx = this.facing * 1; // tiny step
       } else if (dir === 'up') {
         // Uppercut — vertical rising jump-punch. Launches Kele up + puts victim into free-fall.
         // Propulsion move itself → Kele goes helpless after it ends (like other up-specials).
+        // Update 1.1: brief super armor on the startup (breakable by >20 dmg).
         this.moveState = {
           type: 'uppercut', timer: 28, active: [4, 18],
           hasHit: null,
@@ -1323,27 +1355,27 @@
         this.vy = -14;
         this.vx = this.facing * 2.5;
         this.jumps = Math.max(this.jumps, 1);
-        this.invuln = 6;
+        this.armor = 6;
       } else if (dir === 'side') {
         // Suplex — Mii Brawler-style command grab. Pierces shields, huge damage
         // when it lands, whiff punishable. Requires close range.
-        // Update 1.1: super armor on the startup so jabs can't break the grab.
+        // Update 1.1: super armor on startup (breakable by >20 dmg) so jabs can't break the grab.
         this.moveState = {
           type: 'suplex', timer: 32, active: [6, 16],
           grabbed: null, phase: 'reach', // reach → lift → slam
           phaseTimer: 0,
         };
-        this.invuln = 12;
+        this.armor = 12;
         this.vx = this.facing * 2;
       } else if (dir === 'down') {
         // Body Slam — dash downward fast; final impact frame deals heavy damage.
         // In the air: immediate plunge. On the ground: a short leap up then slam down.
-        // Update 1.1: super armor on the launch + drop — light hits can't knock him out of the plunge.
+        // Update 1.1: super armor on launch + drop (breakable by >20 dmg).
         this.moveState = {
           type: 'bodySlam', timer: 44, phase: 'launch',
           hasHit: null,
         };
-        this.invuln = 18;
+        this.armor = 18;
         if (this.onGround) {
           // Jump up first so the slam has vertical space
           this.vy = -11;
@@ -1808,13 +1840,13 @@
       if (dir === 'neutral') {
         // Power Punch — 30-frame (0.5s) windup, then a brutal high-damage,
         // medium-knockback connect. Locks Donny in place during windup but
-        // gives him 8 frames of super-armor on the windup so light hits don't
-        // interrupt the haymaker.
+        // gives him 8 frames of super armor on the windup so light hits don't
+        // interrupt the haymaker. Update 1.1: armor breakable by >20 dmg hits.
         this.moveState = {
           type: 'powerPunchD', timer: 50, active: [30, 38],
           hasHit: null,
         };
-        this.invuln = 8;
+        this.armor = 8;
         if (this.onGround) this.vx = 0;
       } else if (dir === 'side') {
         // Power Dropkick — fast horizontal launch with a body hitbox in front.
@@ -1865,11 +1897,11 @@
           });
         });
       } else if (dir === 'side') {
-        // Rushing Sword — fast horizontal sword dash. Body lunges forward,
-        // sword hitbox in front. Brief invuln on startup.
-        this.moveState = { type: 'rushSword', timer: 22, active: [4, 16], hasHit: null };
-        this.vx = this.facing * 13;
-        this.vy = -2;
+        // Shield Bash — Update 1.1: replaces Rushing Sword. Short forward step
+        // with a heavy shield-bash hitbox up close. Brief invuln on startup.
+        this.moveState = { type: 'shieldBash', timer: 16, active: [4, 12], hasHit: null };
+        this.vx = this.facing * 6;
+        this.vy = -1;
         this.invuln = Math.max(this.invuln, 4);
       } else if (dir === 'up') {
         // Shield Ride — paladin surfs his shield upward as a recovery.
@@ -1960,7 +1992,7 @@
             'jumpShot',    // Colton up-special (recovery)
             'dropkick',    // Donny side-special (forward leap)
             'shieldRide',  // Drew up-special (recovery)
-            'rushSword',   // Drew side-special (forward leap)
+            'shieldBash',  // Drew side-special (short forward step)
             'lightningJump', // Whitney up-special (recovery)
           ]);
           if (propelMoves.has(this.moveState.type) && !this.onGround) {
@@ -1987,7 +2019,7 @@
             jumpShot: 10,
             dropkick: 14,
             powerPunchD: 18,
-            rushSword: 12,
+            shieldBash: 10,
             shieldRide: 10,
             shieldSpike: 14,
             lightningJump: 10,
@@ -2004,6 +2036,7 @@
       }
       if (this.attackCooldown > 0) this.attackCooldown--;
       if (this.invuln > 0) this.invuln--;
+      if (this.armor > 0) this.armor--;
       if (this.counterActive > 0) this.counterActive--;
       if (this.counterCooldown > 0) this.counterCooldown--;
       if (this.hitstun > 0) this.hitstun--;
@@ -2070,6 +2103,16 @@
         const spending = this.moveState && this.moveState.type === 'rocketBoost';
         if (!spending && this.fuel < this.maxFuel) {
           this.fuel = Math.min(this.maxFuel, this.fuel + (this.onGround ? 0.4 : 0.2));
+        }
+      }
+
+      // Angus — Update 1.1: passive code regen. Slow trickle (~9/sec, full from
+      // empty in ~11s) so he's no longer dependent on getting hit. Still gains
+      // the big damage-based and Code Farm boosts on top.
+      if (this.key === 'angus') {
+        const farming = this.moveState && this.moveState.type === 'codeFarm';
+        if (!farming && this.code < this.maxCode) {
+          this.code = Math.min(this.maxCode, this.code + 0.15);
         }
       }
 
@@ -2259,12 +2302,13 @@
             this.attackCooldown = 8;
           }
         }
-        // Drew: Rushing Sword — sustain forward velocity, taper toward end
-        if (this.moveState && this.moveState.type === 'rushSword') {
-          const t = 22 - this.moveState.timer;
-          if (t > 16) this.vx *= 0.78;
-          // sword sparkles
-          if (Math.random() < 0.5) spawnEffect(this.cx + this.facing * 22, this.cy, '#ffd84a', 8, 8);
+        // Drew: Shield Bash — sustain forward velocity briefly, taper fast.
+        if (this.moveState && this.moveState.type === 'shieldBash') {
+          const t = 16 - this.moveState.timer;
+          if (t > 10) this.vx *= 0.65;
+          // silver/gold impact sparkles
+          if (Math.random() < 0.55) spawnEffect(this.cx + this.facing * 18, this.cy, '#c0c8d4', 10, 8);
+          if (Math.random() < 0.3) spawnEffect(this.cx + this.facing * 18, this.cy, '#ffd84a', 8, 8);
         }
         // Drew: Shield Ride — sustain upward velocity briefly
         if (this.moveState && this.moveState.type === 'shieldRide') {
@@ -2717,6 +2761,7 @@
       this.y = STAGE_TOP - 250;
       this.vx = 0; this.vy = 0;
       this.invuln = 90;
+      this.armor = 0;
       this.hitstun = 0;
       this.endlag = 0;
       this.moveState = null;
@@ -2896,13 +2941,13 @@
         return { x: this.x - 14, y: this.y - 28, w: this.w + 28, h: this.h + 28,
                  damage: 5, kbx: this.facing * 1.5, kby: -11, type: 'heavy', uppercut: true };
       }
-      // Drew: Rushing Sword — fast horizontal sword swing during the lunge
-      if (t === 'rushSword') {
-        const elapsed = 22 - this.moveState.timer;
+      // Drew: Shield Bash — close-range shield smash in front during the step.
+      if (t === 'shieldBash') {
+        const elapsed = 16 - this.moveState.timer;
         const [a, b] = this.moveState.active;
         if (elapsed < a || elapsed > b) return null;
-        return { x: this.facing === 1 ? this.x + this.w - 4 : this.x - 50,
-                 y: this.y + 10, w: 54, h: 30,
+        return { x: this.facing === 1 ? this.x + this.w - 6 : this.x - 30,
+                 y: this.y + 12, w: 36, h: 32,
                  damage: 12, kbx: this.facing * 6, kby: -4, type: 'heavy' };
       }
       // Drew: Shield Ride — small body hitbox below as he rides upward
@@ -6683,7 +6728,7 @@
           if (atk.moveState && atk.moveState.type && atk.moveState.type.startsWith('atk_')) {
             atk.moveState.hasHit = atk.moveState.hasHit || new Set();
             atk.moveState.hasHit.add(def);
-          } else if (atk.moveState && ['toxPunch','hardPunch','powerPunch','uppercut','bodySlam','ultraSpike','powerBlast','hammerBonk','jumpShot','powerPunchD','dropkick','ultUpper','rushSword','shieldRide','shieldSpike','dragonClaw','lightningJump','sing','shieldGrab'].includes(atk.moveState.type)) { /* unchanged */
+          } else if (atk.moveState && ['toxPunch','hardPunch','powerPunch','uppercut','bodySlam','ultraSpike','powerBlast','hammerBonk','jumpShot','powerPunchD','dropkick','ultUpper','shieldBash','shieldRide','shieldSpike','dragonClaw','lightningJump','sing','shieldGrab'].includes(atk.moveState.type)) { /* unchanged */
             atk.moveState.hasHit = atk.moveState.hasHit || new Set();
             atk.moveState.hasHit.add(def);
           } else {
@@ -8362,7 +8407,7 @@
         { key: 'liam',    moves: ['Ski Pole Throw', 'Avalanche (telegraphed)', 'Snow Blast', 'Ice Parry'] },
         { key: 'colton',  moves: ['Pool Ball (0.5s windup)', 'Eight Ball (set + kick)', 'Jump Shot', 'Flashing Mach Spear'] },
         { key: 'donny',   moves: ['Power Punch (windup)', 'Power Dropkick', 'Power Grab (fling up)', 'Ultimate Upper'] },
-        { key: 'drew',    moves: ['Shieldmerang (returns)', 'Rushing Sword', 'Shield Ride', 'Shield Spike (meteor)'] },
+        { key: 'drew',    moves: ['Shieldmerang (returns)', 'Shield Bash (short range)', 'Shield Ride', 'Shield Spike (meteor)'] },
         { key: 'whitney', moves: ['Sing (1s stun)', 'Dragon Claw', 'Lightning Jump', 'Stockpile Toss (rock/potion)'] },
       ];
       const rowH = 26;
