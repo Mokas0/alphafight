@@ -157,8 +157,25 @@
         );
       },
     },
+    newHeliopolis: {
+      name: 'New Heliopolis',
+      tagline: 'Sunbaked ruins. Stepped pyramid platforms over a golden horizon.',
+      bgTop: '#ffb84a', bgBottom: '#a04020',
+      mainColor: '#d4a04a',
+      mainAccent: '#ffeb6a',
+      setup() {
+        platforms.length = 0;
+        platforms.push(
+          { x: STAGE_LEFT, y: STAGE_TOP, w: STAGE_RIGHT - STAGE_LEFT, h: 80, solid: true, main: true },
+          // Stepped pyramid: two lower outer steps + a high narrow peak
+          { x: STAGE_LEFT + 100, y: STAGE_TOP - 90, w: 180, h: 12, solid: true },
+          { x: STAGE_RIGHT - 280, y: STAGE_TOP - 90, w: 180, h: 12, solid: true },
+          { x: (STAGE_LEFT + STAGE_RIGHT)/2 - 60, y: STAGE_TOP - 240, w: 120, h: 12, solid: true },
+        );
+      },
+    },
   };
-  const STAGE_KEYS = ['classic', 'lavaLake', 'jubilantJungle', 'crystalCaves'];
+  const STAGE_KEYS = ['classic', 'lavaLake', 'jubilantJungle', 'crystalCaves', 'newHeliopolis'];
   let currentStage = 'classic';
   // Jubilant Jungle: jungle critters that leap in from above and harass fighters.
   const stageNPCs = [];
@@ -639,6 +656,11 @@
       this.shieldBroken = 0;
       this.poisonTimer = 0;  // frames of poison remaining
       this.poisonTick = 0;   // counter for DoT cadence
+      // Angus's "virus" status (Update 1.1): infected fighter takes DoT and
+      // pumps code into the virus's owner on each tick. Cleared on death.
+      this.virusTimer = 0;
+      this.virusTick = 0;
+      this.virusOwner = null;
       // Cole's fuel system + universal "fueled" (gasoline-doused) status.
       this.fuel = 100;       // 0..100, only meaningful for Cole
       this.maxFuel = 100;
@@ -712,6 +734,14 @@
     applyPoison(frames = 90) {
       // 1.5 seconds at 60fps = 90 frames. Refresh (not stack) so re-poisoning resets duration.
       this.poisonTimer = Math.max(this.poisonTimer, frames);
+    }
+
+    applyVirus(frames, owner) {
+      // Angus's down-special virus (Update 1.1). 3 seconds default at 60fps = 180 frames.
+      // Refreshes duration on re-infect and (re-)latches the owner so a fresh
+      // Angus virus replaces a stale one.
+      this.virusTimer = Math.max(this.virusTimer, frames);
+      if (owner) this.virusOwner = owner;
     }
 
     applyFuel(frames = 240) {
@@ -1625,9 +1655,23 @@
           spawnEffect(this.cx + fwd * 30, this.cy, '#0d4f1c', 18, 26);
         });
       } else if (dir === 'down') {
-        // Code Farm — channel for 3 seconds; fills code meter to max over the
-        // duration. Vulnerable; no super armor.
-        this.moveState = { type: 'codeFarm', timer: 180, startCode: this.code };
+        // Virus (Update 1.1) — fires a forward virus projectile. On direct hit
+        // it deals 5 dmg AND latches a 3-second DoT onto the victim. Every
+        // tick of the DoT pumps code into Angus, on top of the normal damage-
+        // based code gain. Replaces the old Code Farm channel — Angus's main
+        // way to generate code is now to *land* the virus on someone.
+        this.moveState = { type: 'virus', timer: 24 };
+        const fwd = this.facing;
+        delaySpawn(5, () => {
+          projectiles.push({
+            owner: this, x: this.cx + fwd * 12, y: this.cy - 8,
+            vx: fwd * 8, vy: -3, w: 16, h: 16,
+            life: 110, damage: 5, kbx: fwd * 3, kby: -3,
+            type: 'virus', gravity: 0.18, spin: 0, tick: 0,
+          });
+          spawnEffect(this.cx + fwd * 18, this.cy, '#39ff14', 16, 22);
+          spawnEffect(this.cx + fwd * 18, this.cy, '#0d4f1c', 12, 18);
+        });
       }
     }
 
@@ -2088,6 +2132,25 @@
         }
       }
 
+      // Virus DoT (Update 1.1) — Angus's down-special. Ticks 1.5 dmg every 30
+      // frames, and each tick pumps +4 code into the virus's owner. The
+      // damage itself still flows through Angus's 2-code-per-dmg gain, so a
+      // full 3-second virus is worth ~42 code total.
+      if (this.virusTimer > 0) {
+        this.virusTimer--;
+        this.virusTick++;
+        if (this.virusTick % 30 === 0) {
+          this.damage += 1.5;
+          spawnEffect(this.cx + (Math.random()-0.5)*22, this.cy + (Math.random()-0.5)*30, '#39ff14', 14, 10);
+          spawnEffect(this.cx + (Math.random()-0.5)*22, this.cy + (Math.random()-0.5)*30, '#0d4f1c', 10, 8);
+          const v = this.virusOwner;
+          if (v && v.key === 'angus' && v.stocks > 0) {
+            v.code = Math.min(v.maxCode, v.code + 4);
+          }
+        }
+        if (this.virusTimer === 0) this.virusOwner = null;
+      }
+
       // Fueled status (gasoline-doused) — purely a marker that lets ignite/firePatch deal bonus.
       // Drips a brown trail visually. Ticks down each frame.
       if (this.fueled > 0) {
@@ -2106,14 +2169,11 @@
         }
       }
 
-      // Angus — Update 1.1: passive code regen. Slow trickle (~9/sec, full from
-      // empty in ~11s) so he's no longer dependent on getting hit. Still gains
-      // the big damage-based and Code Farm boosts on top.
-      if (this.key === 'angus') {
-        const farming = this.moveState && this.moveState.type === 'codeFarm';
-        if (!farming && this.code < this.maxCode) {
-          this.code = Math.min(this.maxCode, this.code + 0.15);
-        }
+      // Angus — Update 1.1: passive code regen. Slow trickle (~9/sec, full
+      // from empty in ~11s) so he's no longer dependent on getting hit. Still
+      // gains the big damage-based and virus-tick boosts on top.
+      if (this.key === 'angus' && this.code < this.maxCode) {
+        this.code = Math.min(this.maxCode, this.code + 0.15);
       }
 
       // Gravity — Jonah falls much slower (floaty)
@@ -2433,18 +2493,9 @@
             spawnEffect(this.cx + this.facing * 24, this.cy + (Math.random()-0.5)*40, '#39ff14', 14, 10);
           }
         }
-        // Angus: Code Farm — channel; fills code meter linearly over the duration.
-        if (this.moveState && this.moveState.type === 'codeFarm') {
-          if (this.onGround) this.vx *= 0.4;
-          const m = this.moveState;
-          const elapsed = 180 - m.timer;
-          const target = Math.min(this.maxCode, m.startCode + (this.maxCode - m.startCode) * (elapsed / 180));
-          this.code = Math.max(this.code, target); // monotonic — fills toward max even if startCode was high
-          if (m.timer % 4 === 0) {
-            for (let k = 0; k < 2; k++) {
-              spawnEffect(this.cx + (Math.random()-0.5)*40, this.cy + (Math.random()-0.5)*50, '#39ff14', 18, 10);
-            }
-          }
+        // Angus: Virus (Update 1.1) — minor in-flight wobble on the projectile.
+        if (this.moveState && this.moveState.type === 'virus') {
+          if (this.onGround) this.vx *= 0.65;
         }
         // Theo: Charge Bomb — accumulate charge while special held; on release,
         // launch a flying orb projectile carrying the stored charge. Detonation
@@ -2720,6 +2771,9 @@
       this.damage = 0;
       this.poisonTimer = 0;
       this.poisonTick = 0;
+      this.virusTimer = 0;
+      this.virusTick = 0;
+      this.virusOwner = null;
       this.fueled = 0;
       this.fueledTick = 0;
       this.fuel = this.maxFuel;
@@ -6514,6 +6568,13 @@
             if (p.type === 'poisonLob') {
               f.applyPoison(90);
             }
+            // Virus (Angus down-special, Update 1.1): 3 seconds of DoT that
+            // pumps code back to Angus on every tick.
+            if (p.type === 'virus') {
+              f.applyVirus(180, p.owner);
+              spawnEffect(f.cx, f.cy, '#39ff14', 26, 38);
+              spawnEffect(f.cx, f.cy, '#0d4f1c', 20, 32);
+            }
             if (p.type !== 'bolt') p.life = 0;
           }
         }
@@ -6818,6 +6879,34 @@
       grad.addColorStop(1, 'rgba(120, 100, 220, 0)');
       ctx.fillStyle = grad;
       ctx.fillRect(BLAST_LEFT - 100, BLAST_TOP, (BLAST_RIGHT - BLAST_LEFT) + 200, STAGE_TOP - BLAST_TOP);
+    } else if (currentStage === 'newHeliopolis') {
+      // Massive low sun behind the stage with soft radial bloom
+      const sunCx = (STAGE_LEFT + STAGE_RIGHT) / 2;
+      const sunCy = STAGE_TOP - 80;
+      const sunR  = 140;
+      const sunGrad = ctx.createRadialGradient(sunCx, sunCy, 0, sunCx, sunCy, sunR * 2.2);
+      sunGrad.addColorStop(0, 'rgba(255, 235, 106, 0.55)');
+      sunGrad.addColorStop(0.5, 'rgba(255, 184, 74, 0.18)');
+      sunGrad.addColorStop(1, 'rgba(255, 184, 74, 0)');
+      ctx.fillStyle = sunGrad;
+      ctx.fillRect(BLAST_LEFT - 100, BLAST_TOP, (BLAST_RIGHT - BLAST_LEFT) + 200, BLAST_BOTTOM - BLAST_TOP);
+      // Hard sun disc
+      ctx.fillStyle = '#ffeb6a';
+      ctx.beginPath();
+      ctx.arc(sunCx, sunCy, sunR, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = 'rgba(255, 255, 220, 0.5)';
+      ctx.beginPath();
+      ctx.arc(sunCx - 18, sunCy - 22, sunR * 0.55, 0, Math.PI * 2);
+      ctx.fill();
+      // Drifting sand particles along the bottom — subtle horizontal streaks
+      ctx.fillStyle = 'rgba(212, 160, 74, 0.35)';
+      const tt = Date.now() * 0.001;
+      for (let sx = BLAST_LEFT; sx < BLAST_RIGHT; sx += 60) {
+        const drift = ((sx * 0.4 + tt * 90) % 120) - 60;
+        const sy = BLAST_BOTTOM - 30 - Math.sin(sx * 0.04 + tt) * 6;
+        ctx.fillRect(sx + drift, sy, 16, 2);
+      }
     }
 
     // Platforms (themed colors per stage)
@@ -7229,6 +7318,36 @@
           ctx.fillStyle = `rgba(0, 0, 0, ${0.4 - p.life / 200})`;
           ctx.fillRect(p.x, p.y, p.w, p.h);
         }
+      } else if (p.type === 'virus') {
+        // Virus blob — pulsing dark-green core with spiky bright-green protrusions.
+        // Spins as it flies. Trailing glow underneath.
+        p.spin = (p.spin || 0) + 0.22;
+        const cx = p.x + p.w/2, cy = p.y + p.h/2;
+        const pulse = 0.85 + Math.sin((p.tick || 0) * 0.35) * 0.15;
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(p.spin);
+        // Outer glow halo
+        ctx.fillStyle = `rgba(57, 255, 20, ${0.18 * pulse})`;
+        ctx.beginPath(); ctx.arc(0, 0, 12 * pulse, 0, Math.PI * 2); ctx.fill();
+        // Spike protrusions (6 radial)
+        ctx.fillStyle = '#39ff14';
+        for (let k = 0; k < 6; k++) {
+          const a = (k / 6) * Math.PI * 2;
+          const sx = Math.cos(a) * 9 * pulse;
+          const sy = Math.sin(a) * 9 * pulse;
+          ctx.beginPath();
+          ctx.arc(sx, sy, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // Core
+        ctx.fillStyle = '#0d4f1c';
+        ctx.beginPath(); ctx.arc(0, 0, 6, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#39ff14';
+        ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+        if (p.tick == null) p.tick = 0;
+        p.tick++;
       } else if (p.type === 'avalancheMarker') {
         // Telegraph: red flashing zone on the ground where the ice will land
         const flash = (p.tick % 6) < 3 ? '#ff4444' : '#ffeb3b';
@@ -8402,7 +8521,7 @@
         { key: 'jonah',   moves: ['Beet Blast', 'Beet Snatch (mash atk)', 'Glide', 'Ultra Spike'] },
         { key: 'theo',    moves: ['Charge Orb (projectile)', 'Power Blast', 'Teleport', 'Absorb'] },
         { key: 'cole',    moves: ['Igniter Toss', 'Gasoline (fuel cost)', 'Rocket Boost', 'Molotov'] },
-        { key: 'angus',   moves: ['Code Disrupter', 'Firewall (reflects)', 'Grappling Hook', 'Code Farm'] },
+        { key: 'angus',   moves: ['Code Disrupter', 'Firewall (reflects)', 'Grappling Hook', 'Virus (DoT + code)'] },
         { key: 'aidan',   moves: ['Loot Box (random fx)', 'Hammer Bonk', 'Cannon Launch', 'Cheese Throw'] },
         { key: 'liam',    moves: ['Ski Pole Throw', 'Avalanche (telegraphed)', 'Snow Blast', 'Ice Parry'] },
         { key: 'colton',  moves: ['Pool Ball (0.5s windup)', 'Eight Ball (set + kick)', 'Jump Shot', 'Flashing Mach Spear'] },

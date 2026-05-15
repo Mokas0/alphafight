@@ -133,7 +133,7 @@ damage point). Drives platforms, walls, and recoveries; reset on death.
 - **Neutral**: Code Disrupter (costs 25 code; spawns a 110×8 px temporary platform in front of Angus that lasts ~5 seconds — anyone can stand on it)
 - **Side**: Firewall (costs 20 code; plants a vertical wall of code that **reflects projectiles** back at the attacker)
 - **Up**: Grappling Hook (lobbed hook — direct hit on a fighter yanks them toward Angus; miss/expiry pulls Angus toward the hook tip as a recovery boost)
-- **Down**: Code Farm (channels for 3 seconds and fills the code meter to max — vulnerable, no super armor)
+- **Down**: Virus (forward projectile — direct hit 5 dmg + 3-second DoT ticking 1.5 dmg / 0.5 s. Every DoT tick also pumps +4 code into Angus. No code cost; this is his main code generator.)
 
 ### Aidan — Jester (purple/gold)
 Jokester with a chaos kit — random effects, hammers, and lobbed cheese.
@@ -349,11 +349,25 @@ The Rushing Sword forward dash is replaced with a short-range Shield Bash:
 The move now plays as a punchy point-blank smash with a shield instead of a
 lunging sword swipe.
 
+**Angus — down-special replaced: Virus**
+The old Code Farm channel is gone. Angus's down-special is now a forward
+**Virus** projectile:
+
+- Direct hit: 5 dmg + applies the *virus* status to the victim for 3 seconds.
+- Virus DoT ticks every 0.5 seconds: 1.5 dmg per tick, no knockback.
+- Every tick of the DoT also pumps **+4 code** back into Angus, on top of his
+  usual 2-code-per-damage gain. A full 3-second virus is worth ~42 code.
+- No code cost to fire (this *is* his code generator now).
+
+Re-infecting refreshes duration (doesn't stack), and the latest Angus owns
+the tick payout. Clears on death.
+
 **Angus — passive code regen**
-Angus's code meter now ticks up automatically: +0.15 per frame (~9 / sec, full
-from empty in ~11 seconds). He still gets the big damage-based and Code Farm
-boosts on top — but he's no longer dead in the water if the opponent refuses
-to hit him. Regen pauses while channeling Code Farm.
+Angus's code meter also ticks up automatically: +0.15 per frame (~9 / sec,
+full from empty in ~11 seconds). Stacks with damage-taken gains and virus
+ticks. Together with the new virus he's no longer dead in the water if the
+opponent refuses to hit him *or* let him channel — landing one virus + the
+passive trickle fuels his whole kit.
 
 **Derek — Shuriken is now a three-shuriken spread**
 Neutral special throws three shuriken in a vertical spray instead of one:
@@ -371,6 +385,15 @@ they have 700 px on each side (over double).
 
 Recoveries are much more forgiving. Edgeguards are still possible but require
 chasing further off-stage. Stage and ledge positions are unchanged.
+
+**New stage — New Heliopolis**
+A fifth stage joins the rotation:
+
+- **Theme:** sunbaked Egyptian ruins. Massive golden sun looming behind the
+  stage, drifting sand at the horizon, sandstone-and-gold platform palette.
+- **Layout:** stepped-pyramid platforms instead of the classic three-layout —
+  two wide lower steps flanking the stage, plus a high narrow peak at center.
+- **Gimmick:** none (yet). Pure layout + visual variant.
 
 ## Credits
 
