@@ -133,7 +133,7 @@ damage point). Drives platforms, walls, and recoveries; reset on death.
 - **Neutral**: Code Disrupter (costs 25 code; spawns a 110×8 px temporary platform in front of Angus that lasts ~5 seconds — anyone can stand on it)
 - **Side**: Firewall (costs 20 code; plants a vertical wall of code that **reflects projectiles** back at the attacker)
 - **Up**: Grappling Hook (lobbed hook — direct hit on a fighter yanks them toward Angus; miss/expiry pulls Angus toward the hook tip as a recovery boost)
-- **Down**: Code Farm (channels for 3 seconds and fills the code meter to max — vulnerable, no super armor)
+- **Down**: Virus (forward projectile — direct hit 5 dmg + 3-second DoT ticking 1.5 dmg / 0.5 s. Every DoT tick also pumps +4 code into Angus. No code cost; this is his main code generator.)
 
 ### Aidan — Jester (purple/gold)
 Jokester with a chaos kit — random effects, hammers, and lobbed cheese.
@@ -295,6 +295,105 @@ and make sure the filename is exactly `index.html` — not `index (1).html`).
 - Blastzone coordinates and ledge positions are in the stage-constants block.
 - Shield drain/regen rates and break-stun duration are in the block-handling section
   of `Fighter.update()`.
+
+## Changelog
+
+### Update 1.1
+
+**Super armor — breakable now**
+Heavy commit moves (Kele's specials, Greyson's Mega Jump, Donny's Power Punch)
+no longer grant pure invincibility on their armor windows. Instead:
+
+- Hits ≤ 20 dmg are absorbed — no damage, no flinch (yellow flash + block sfx).
+- Hits > 20 dmg **break** the armor: the fighter takes full damage and is
+  stunned for 60 frames (shield-break style). The move is canceled mid-swing.
+
+The threshold is set so that most jab / fast-aerial damage bounces, but
+heavy committed swings (Kele Power Punch 20, Donny Power Punch ~25+,
+Drew Shield Spike spike, Aidan Hammer Bonk 14 if charged, charged Orb,
+Pool Ball, etc.) can punch through.
+
+**Jonah — fall speed decreased**
+- Gravity: 0.38 → 0.30
+- Terminal fall velocity: 9 → 7
+
+Jonah is now meaningfully floatier. Recoveries reach farther, and he's harder
+to combo or knock out of the air. The trade-off is the same as before: he's
+still the lightest fighter (0.75 weight) and dies early to clean hits.
+
+**Kele — King K. Rool-style super armor on more attacks**
+Kele already had a super-armor windup on Power Punch. Three more of his
+specials now carry (breakable) armor on commitment frames:
+
+- **Power Punch (neutral):** 14 frames of armor — windup. Unchanged duration.
+- **Uppercut (up):** 6 frames of armor — startup. Was iframes before; same value,
+  now goes through the >20-dmg break rule.
+- **Suplex (side):** 12 frames of armor on the startup. Light jabs no longer
+  break Kele out of his grab.
+- **Body Slam (down):** 18 frames of armor on the launch + drop. Projectiles
+  and weak air hits can't knock him out of the plunge once he commits.
+
+He still loses to clean reads, spacing, grabs, and now any single hit
+over 20 dmg.
+
+**Drew — Side-special is now Shield Bash**
+The Rushing Sword forward dash is replaced with a short-range Shield Bash:
+
+- Forward velocity: 13 → 6 (less than half — Drew is no longer flying across
+  the stage)
+- Move duration: 22 → 16 frames
+- Active hitbox: tighter and closer to Drew's body (54×30 reach → 36×32 chunk)
+- Damage / KB unchanged
+- Same 4-frame startup invuln
+
+The move now plays as a punchy point-blank smash with a shield instead of a
+lunging sword swipe.
+
+**Angus — down-special replaced: Virus**
+The old Code Farm channel is gone. Angus's down-special is now a forward
+**Virus** projectile:
+
+- Direct hit: 5 dmg + applies the *virus* status to the victim for 3 seconds.
+- Virus DoT ticks every 0.5 seconds: 1.5 dmg per tick, no knockback.
+- Every tick of the DoT also pumps **+4 code** back into Angus, on top of his
+  usual 2-code-per-damage gain. A full 3-second virus is worth ~42 code.
+- No code cost to fire (this *is* his code generator now).
+
+Re-infecting refreshes duration (doesn't stack), and the latest Angus owns
+the tick payout. Clears on death.
+
+**Angus — passive code regen**
+Angus's code meter also ticks up automatically: +0.15 per frame (~9 / sec,
+full from empty in ~11 seconds). Stacks with damage-taken gains and virus
+ticks. Together with the new virus he's no longer dead in the water if the
+opponent refuses to hit him *or* let him channel — landing one virus + the
+passive trickle fuels his whole kit.
+
+**Derek — Shuriken is now a three-shuriken spread**
+Neutral special throws three shuriken in a vertical spray instead of one:
+center shuriken flies straight, upper and lower shuriken angled ±1.6 px/frame.
+Same per-shuriken damage (6) and KB. Whiffed shots still get the full Derek
+zoner pressure; up close, all three can connect for big chip.
+
+**Stage — horizontal offstage area widened a LOT**
+Previously fighters had 300 px between the stage edge and the blastzone. Now
+they have 700 px on each side (over double).
+
+- `WORLD_W`: 1800 → 2200
+- `BLAST_LEFT`: 100 → -300
+- `BLAST_RIGHT`: 1700 → 2100 (still `WORLD_W - 100`)
+
+Recoveries are much more forgiving. Edgeguards are still possible but require
+chasing further off-stage. Stage and ledge positions are unchanged.
+
+**New stage — New Heliopolis**
+A fifth stage joins the rotation:
+
+- **Theme:** sunbaked Egyptian ruins. Massive golden sun looming behind the
+  stage, drifting sand at the horizon, sandstone-and-gold platform palette.
+- **Layout:** stepped-pyramid platforms instead of the classic three-layout —
+  two wide lower steps flanking the stage, plus a high narrow peak at center.
+- **Gimmick:** none (yet). Pure layout + visual variant.
 
 ## Credits
 
