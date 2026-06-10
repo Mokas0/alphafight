@@ -5463,6 +5463,102 @@
           ctx.arc(bx, by - 9, 1.2, 0, Math.PI*2);
           ctx.fill();
         }
+        // -- ANGUS POLISH --
+        // Virus cast — extended casting arm + green code aura at his palm during the throw.
+        if (t === 'virus') {
+          const elapsed = 24 - this.moveState.timer;
+          const fwd = this.facing;
+          if (elapsed < 6) {
+            // Anticipation: arm pulled back, green code-glow gathering at palm.
+            const palmX = this.cx - fwd * 10;
+            const palmY = this.cy - 4;
+            const grow = elapsed / 5;
+            ctx.strokeStyle = '#ffddba';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.cy - 2);
+            ctx.lineTo(palmX, palmY);
+            ctx.stroke();
+            ctx.fillStyle = `rgba(57, 255, 20, ${0.35 + grow * 0.45})`;
+            ctx.beginPath();
+            ctx.arc(palmX, palmY, 3 + grow * 5, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = `rgba(13, 79, 28, ${0.6 * grow})`;
+            ctx.beginPath();
+            ctx.arc(palmX, palmY, 6 + grow * 7, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            // Throw motion: arm forward, lingering code wisp at palm.
+            const palmX = this.cx + fwd * 14;
+            const palmY = this.cy - 4;
+            ctx.strokeStyle = '#ffddba';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.cy - 2);
+            ctx.lineTo(palmX, palmY);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(57, 255, 20, 0.5)';
+            ctx.beginPath();
+            ctx.arc(palmX, palmY, 4, 0, Math.PI * 2);
+            ctx.fill();
+            // Tiny scrolling code symbol next to the hand
+            ctx.fillStyle = '#39ff14';
+            ctx.font = 'bold 8px monospace';
+            const syms = ['{', '}', '<', '>', '/'];
+            const sym = syms[(elapsed) % syms.length];
+            ctx.fillText(sym, palmX + fwd * 8, palmY);
+          }
+        }
+        // Code Disrupter — summoning gesture + scrolling binary aura while the
+        // platform projectile is being conjured.
+        if (t === 'codeDisrupter') {
+          const elapsed = 26 - this.moveState.timer;
+          const fwd = this.facing;
+          // Outstretched summoning arm
+          ctx.strokeStyle = '#ffddba';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(this.cx, this.cy - 2);
+          ctx.lineTo(this.cx + fwd * 18, this.cy - 8);
+          ctx.stroke();
+          // Pulsing green hand-glow at the summon point.
+          const pulse = 0.4 + Math.sin(elapsed * 0.45) * 0.2;
+          ctx.fillStyle = `rgba(57, 255, 20, ${pulse})`;
+          ctx.beginPath();
+          ctx.arc(this.cx + fwd * 18, this.cy - 8, 7, 0, Math.PI * 2);
+          ctx.fill();
+          // Scrolling binary digits floating around Angus's torso while casting.
+          ctx.fillStyle = `rgba(57, 255, 20, ${0.55})`;
+          ctx.font = 'bold 9px monospace';
+          for (let k = 0; k < 5; k++) {
+            const a = (elapsed * 0.18) + (k / 5) * Math.PI * 2;
+            const r = 24 + Math.sin(elapsed * 0.3 + k) * 3;
+            const bx = this.cx + Math.cos(a) * r;
+            const by = this.cy + Math.sin(a) * r * 0.7;
+            ctx.fillText((elapsed + k) % 2 === 0 ? '1' : '0', bx, by);
+          }
+        }
+        // Grappling Hook windup — pre-throw arm reach with green code glow at hand.
+        if (t === 'grappleHook') {
+          const elapsed = 18 - this.moveState.timer;
+          const fwd = this.facing;
+          if (elapsed < 4) {
+            // Anticipation: arm sweeping up + back as Angus winds up the throw.
+            const palmX = this.cx + fwd * (4 - elapsed * 2);
+            const palmY = this.cy - 8 - elapsed * 2;
+            ctx.strokeStyle = '#ffddba';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.cy - 2);
+            ctx.lineTo(palmX, palmY);
+            ctx.stroke();
+            ctx.fillStyle = '#39ff14';
+            ctx.beginPath();
+            ctx.arc(palmX, palmY, 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+
         // -- AIDAN POLISH --
         // Hammer Bonk — a real hammer sprite (wooden handle + heavy metal head)
         // that arcs from a cocked-back windup pose to a forward slam during the
@@ -6305,8 +6401,23 @@
 
       // Cole projectiles: molotov + igniter spin, fire patch ignites adjacent gasoline puddles
       if (p.type === 'molotov') p.spin = (p.spin || 0) + 0.4;
-      if (p.type === 'igniter') p.spin = (p.spin || 0) + 0.55;
-      if (p.type === 'chargedOrb') p.spin = (p.spin || 0) + 0.35;
+      if (p.type === 'igniter') {
+        p.spin = (p.spin || 0) + 0.55;
+        // Spark trail — bright yellow + orange embers fly off behind the tumbling igniter.
+        if (Math.random() < 0.7) spawnEffect(p.x + p.w/2 - p.vx * 0.4, p.y + p.h/2 - p.vy * 0.3, '#ffeb3b', 10, 5);
+        if (Math.random() < 0.4) spawnEffect(p.x + p.w/2 - p.vx * 0.7, p.y + p.h/2 - p.vy * 0.5, '#ff8a3a', 12, 4);
+      }
+      if (p.type === 'chargedOrb') {
+        p.spin = (p.spin || 0) + 0.35;
+        // Dark-energy swirl trail — purple + cyan particles streaming behind.
+        if (Math.random() < 0.75) spawnEffect(p.x + p.w/2 - p.vx * 0.35, p.y + p.h/2 - p.vy * 0.35, '#8a4ade', 12, 6);
+        if (Math.random() < 0.5) spawnEffect(p.x + p.w/2 - p.vx * 0.6, p.y + p.h/2 - p.vy * 0.5 + (Math.random()-0.5)*6, '#4ad7e8', 10, 5);
+      }
+      // Angus virus — code-bit particles flying off as it spins.
+      if (p.type === 'virus') {
+        if (Math.random() < 0.55) spawnEffect(p.x + p.w/2 + (Math.random()-0.5)*16, p.y + p.h/2 + (Math.random()-0.5)*16, '#39ff14', 14, 5);
+        if (Math.random() < 0.3) spawnEffect(p.x + p.w/2 - p.vx * 0.5, p.y + p.h/2 - p.vy * 0.5, '#0d4f1c', 12, 4);
+      }
       if (p.type === 'lootBox') p.spin = (p.spin || 0) + 0.18;
       if (p.type === 'cheese') p.spin = (p.spin || 0) + 0.22;
       if (p.type === 'skiPole') p.spin = (p.spin || 0) + 0.45;
@@ -7915,25 +8026,44 @@
       } else if (p.type === 'grapple') {
         const owner = p.owner;
         if (owner && owner.respawnTimer === 0) {
+          const sx = owner.cx, sy = owner.cy;
+          const ex = p.x + p.w/2, ey = p.y + p.h/2;
+          const segments = 14;
+          // Bright green chain line — the structural cable.
           ctx.strokeStyle = '#39ff14';
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.moveTo(owner.cx, owner.cy);
-          ctx.lineTo(p.x + p.w/2, p.y + p.h/2);
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(ex, ey);
           ctx.stroke();
-          ctx.strokeStyle = 'rgba(57, 255, 20, 0.5)';
+          // Chain "links" — alternating dark/light segments along the line evoke code blocks.
+          for (let i = 0; i < segments; i++) {
+            const u = (i + 0.5) / segments;
+            const px = sx + (ex - sx) * u;
+            const py = sy + (ey - sy) * u;
+            ctx.fillStyle = i % 2 === 0 ? '#0d4f1c' : '#aaffaa';
+            ctx.fillRect(px - 2, py - 2, 4, 4);
+          }
+          // Faint dotted halo
+          ctx.strokeStyle = 'rgba(57, 255, 20, 0.35)';
           ctx.lineWidth = 1;
-          ctx.setLineDash([4, 3]);
+          ctx.setLineDash([3, 4]);
           ctx.beginPath();
-          ctx.moveTo(owner.cx, owner.cy);
-          ctx.lineTo(p.x + p.w/2, p.y + p.h/2);
+          ctx.moveTo(sx, sy);
+          ctx.lineTo(ex, ey);
           ctx.stroke();
           ctx.setLineDash([]);
         }
+        // Hook head — bracket-shape green block.
         ctx.fillStyle = '#0d4f1c';
-        ctx.fillRect(p.x, p.y, p.w, p.h);
+        ctx.fillRect(p.x - 1, p.y - 1, p.w + 2, p.h + 2);
         ctx.fillStyle = '#39ff14';
         ctx.fillRect(p.x + 1, p.y + 1, p.w - 2, p.h - 2);
+        ctx.fillStyle = '#0d4f1c';
+        ctx.font = 'bold 8px monospace';
+        ctx.textAlign = 'center';
+        ctx.fillText('{', p.x + p.w/2, p.y + p.h/2 + 3);
+        ctx.textAlign = 'left';
         ctx.fillStyle = '#ffffff';
         ctx.fillRect(p.x + 3, p.y + 3, p.w - 6, p.h - 6);
       } else if (p.type === 'chargedOrb') {
