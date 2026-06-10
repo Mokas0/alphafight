@@ -2256,6 +2256,11 @@
           else if (frameKeys[ctrl.right]) { this.vx = Math.min(this.vx + 0.3, 4.5); this.facing = 1; }
           // Wing flap visual
           if (Math.random() < 0.4) spawnEffect(this.cx + (Math.random()-0.5)*30, this.cy + 4, '#a0e0d0', 12, 10);
+          // Wind-trail particles behind Jonah while gliding — layered teal + pink wisps.
+          if (Math.abs(this.vx) > 1) {
+            if (Math.random() < 0.55) spawnEffect(this.cx - this.facing * 22, this.cy + (Math.random()-0.5)*16, '#a0e0d0', 18, 6);
+            if (Math.random() < 0.35) spawnEffect(this.cx - this.facing * 28, this.cy + (Math.random()-0.5)*20, '#e070b0', 16, 4);
+          }
         }
         // Jonah: Beet Snatch — once a victim is grabbed, hold them in front
         // of Jonah and let the player mash the attack key for damage. After
@@ -2360,14 +2365,23 @@
         if (this.moveState && this.moveState.type === 'ultraSpike') {
           this.vx = 0;
           this.vy = Math.min(this.vy + 1.2, 22);   // accelerate downward hard
-          // Red-pink streak
-          if (Math.random() < 0.7) spawnEffect(this.cx + (Math.random()-0.5)*20, this.y - 6, '#e070b0', 12, 10);
+          // Layered comet plume — pink streak + teal core + grey smoke wake.
+          if (Math.random() < 0.85) spawnEffect(this.cx + (Math.random()-0.5)*22, this.y - 6, '#e070b0', 14, 12);
+          if (Math.random() < 0.6) spawnEffect(this.cx + (Math.random()-0.5)*14, this.y - 14, '#a0e0d0', 12, 8);
+          if (Math.random() < 0.4) spawnEffect(this.cx + (Math.random()-0.5)*26, this.y - 22, '#888888', 18, 6);
           // Bounce on first ground contact
           if (this.onGround && !this.moveState.bounced) {
             this.moveState.bounced = true;
             this.vy = -12;
-            spawnEffect(this.cx, this.y + this.h, '#e070b0', 22, 32);
-            spawnEffect(this.cx, this.y + this.h, '#a0e0d0', 18, 36);
+            // Bigger landing burst — three layered rings of dust + petals.
+            spawnEffect(this.cx, this.y + this.h, '#ffffff', 18, 28);
+            spawnEffect(this.cx, this.y + this.h, '#e070b0', 24, 40);
+            spawnEffect(this.cx, this.y + this.h, '#a0e0d0', 20, 46);
+            // Side-spray petals
+            for (let k = -2; k <= 2; k++) {
+              if (k === 0) continue;
+              spawnEffect(this.cx + k * 14, this.y + this.h - 2, '#e070b0', 18, 8);
+            }
             // Refund a jump so they can act after the bounce
             this.jumps = Math.max(this.jumps - 1, 0);
             // End the move on bounce so Jonah regains control
@@ -5005,6 +5019,46 @@
           }
         }
 
+        // Hard Punch active — radiating crack lines + impact splash on the fist tip.
+        if (t === 'hardPunch') {
+          const hb = this.getHitbox();
+          if (hb) {
+            const fx = this.facing === 1 ? hb.x + hb.w - 6 : hb.x + 6;
+            const fy = hb.y + hb.h/2;
+            // 6 short radiating crack lines fanning forward.
+            ctx.strokeStyle = 'rgba(255, 235, 100, 0.85)';
+            ctx.lineWidth = 2;
+            for (let k = 0; k < 6; k++) {
+              const ang = (k / 5 - 0.5) * Math.PI * 0.6;
+              const len = 14 + Math.random() * 6;
+              ctx.beginPath();
+              ctx.moveTo(fx, fy);
+              ctx.lineTo(fx + Math.cos(ang) * this.facing * len, fy + Math.sin(ang) * len);
+              ctx.stroke();
+            }
+            // White hot core flash at fist
+            ctx.fillStyle = 'rgba(255, 255, 240, 0.85)';
+            ctx.beginPath();
+            ctx.arc(fx, fy, 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        // Mega Jump armor aura — yellow ring around Greyson during the
+        // breakable super-armor window (first ~10 frames after takeoff).
+        if (t === 'megaJump' && this.armor > 0) {
+          const a = 0.35 + Math.sin(this.armor * 0.4) * 0.18;
+          ctx.strokeStyle = `rgba(212, 199, 122, ${a})`;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.ellipse(this.cx, this.cy, this.w * 0.95, this.h * 0.7, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.strokeStyle = `rgba(255, 235, 59, ${a * 0.6})`;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.ellipse(this.cx, this.cy, this.w * 0.75, this.h * 0.55, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
         // -- KELE POLISH --
         // Suplex pre-grab stomp — heavy step forward dust cloud
         if (t === 'suplex' && !this.moveState.grabbed) {
@@ -5030,6 +5084,54 @@
             ctx.lineTo(this.cx + dx + 4, this.y + this.h + 4 + Math.sin(this.animTick * 0.3 + k) * 1.5);
             ctx.stroke();
           }
+        }
+        // Power Punch armor sparks — 6 orbiting gold dots while super armor is active.
+        if (t === 'powerPunch' && this.armor > 0) {
+          ctx.fillStyle = '#f0d050';
+          for (let k = 0; k < 6; k++) {
+            const ang = this.animTick * 0.18 + (k / 6) * Math.PI * 2;
+            const rx = this.w * 0.95;
+            const ry = this.h * 0.65;
+            ctx.beginPath();
+            ctx.arc(this.cx + Math.cos(ang) * rx, this.cy + Math.sin(ang) * ry, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        // Uppercut launch — rising trail sparks at Kele's feet for the first few frames.
+        if (t === 'uppercut' && (28 - this.moveState.timer) < 8) {
+          const age = 28 - this.moveState.timer;
+          ctx.fillStyle = `rgba(240, 208, 80, ${0.7 - age * 0.08})`;
+          for (let k = 0; k < 4; k++) {
+            const px = this.cx + (k - 1.5) * 8;
+            const py = this.y + this.h + 4 + k * 2;
+            ctx.beginPath();
+            ctx.arc(px, py, 3 + Math.random() * 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          // Bright gold glow under his feet on frame 0
+          if (age < 3) {
+            const grow = 1 - age / 3;
+            ctx.fillStyle = `rgba(255, 235, 59, ${grow * 0.65})`;
+            ctx.beginPath();
+            ctx.arc(this.cx, this.y + this.h, 16 + grow * 6, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        // Body Slam drop — vertical red speed lines flanking Kele during the plunge.
+        if (t === 'bodySlam' && this.moveState.phase === 'drop') {
+          ctx.strokeStyle = 'rgba(163, 64, 64, 0.55)';
+          ctx.lineWidth = 2;
+          for (let k = 0; k < 3; k++) {
+            const off = (k + 1) * 10;
+            ctx.beginPath();
+            ctx.moveTo(this.x - off, this.cy - 4);
+            ctx.lineTo(this.x - off, this.cy + 14);
+            ctx.moveTo(this.x + this.w + off, this.cy - 4);
+            ctx.lineTo(this.x + this.w + off, this.cy + 14);
+            ctx.stroke();
+          }
+          // Trailing red embers above as he plummets
+          if (Math.random() < 0.6) spawnEffect(this.cx + (Math.random()-0.5)*this.w, this.y - 8, '#a34040', 14, 6);
         }
 
         // -- THEO POLISH --
@@ -6167,6 +6269,16 @@
         if (Math.random() < 0.35) spawnEffect(tx - p.vx * 1.1, ty + (Math.random()-0.5)*6, '#222222', 14, 8);
       }
       if (p.type === 'grenade') p.spin = (p.spin || 0) + 0.3;
+      // Update 1.1 polish: grenade leaves a thin smoke trail while in flight.
+      if (p.type === 'grenade' && (Math.abs(p.vx) + Math.abs(p.vy)) > 1) {
+        if (Math.random() < 0.5) spawnEffect(p.x + p.w/2 - p.vx * 0.4, p.y + p.h/2 - p.vy * 0.4, '#3a4a2a', 14, 5);
+        if (Math.random() < 0.25) spawnEffect(p.x + p.w/2 - p.vx * 0.6, p.y + p.h/2 - p.vy * 0.6, '#888888', 12, 4);
+      }
+      // Jonah beet — small magenta + teal petal trail behind each pellet.
+      if (p.type === 'beet') {
+        if (Math.random() < 0.45) spawnEffect(p.x + p.w/2 - p.vx * 0.4, p.y + p.h/2 - p.vy * 0.4, '#e070b0', 10, 4);
+        if (Math.random() < 0.2) spawnEffect(p.x + p.w/2 - p.vx * 0.7, p.y + p.h/2 - p.vy * 0.5, '#a0e0d0', 9, 3);
+      }
 
       // Grenade fuse — explode in place after timer runs out
       if (p.type === 'grenade' && !stationary) {
