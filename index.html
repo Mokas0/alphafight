@@ -6041,6 +6041,249 @@
           ctx.arc(this.cx + fwd * 22, this.cy + 16, 3, 0, Math.PI * 2);
           ctx.fill();
         }
+        // -- DREW POLISH --
+        // Shieldmerang throw — arm extension + bright spark at hand on release.
+        if (t === 'shieldmerang') {
+          const elapsed = 22 - this.moveState.timer;
+          const fwd = this.facing;
+          if (elapsed < 5) {
+            // Anticipation: shield pulled back at side, building gold spark.
+            const grow = elapsed / 5;
+            const palmX = this.cx - fwd * 8;
+            const palmY = this.cy + 2;
+            ctx.strokeStyle = '#ffddba';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.cy);
+            ctx.lineTo(palmX, palmY);
+            ctx.stroke();
+            ctx.fillStyle = `rgba(255, 216, 74, ${0.35 + grow * 0.45})`;
+            ctx.beginPath();
+            ctx.arc(palmX, palmY, 4 + grow * 4, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (elapsed < 10) {
+            // Throw: arm forward, gold flash at palm.
+            const palmX = this.cx + fwd * 16;
+            const palmY = this.cy - 2;
+            ctx.strokeStyle = '#ffddba';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.cy);
+            ctx.lineTo(palmX, palmY);
+            ctx.stroke();
+            const flashAge = elapsed - 5;
+            ctx.fillStyle = `rgba(255, 255, 255, ${1 - flashAge * 0.2})`;
+            ctx.beginPath();
+            ctx.arc(palmX, palmY, 8 - flashAge, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        // Shield Bash — bright impact crack + brief silver-gold burst at active frames.
+        if (t === 'shieldBash') {
+          const hb = this.getHitbox();
+          if (hb) {
+            const fwd = this.facing;
+            // Body-arm reaching with shield
+            ctx.strokeStyle = '#ffddba';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.cy);
+            ctx.lineTo(hb.x + (fwd === 1 ? hb.w - 8 : 8), hb.y + hb.h/2);
+            ctx.stroke();
+            // Shield disc in front of body
+            const sx = hb.x + (fwd === 1 ? hb.w - 6 : 6);
+            const sy = hb.y + hb.h/2;
+            ctx.fillStyle = '#c0c8d4';
+            ctx.beginPath();
+            ctx.ellipse(sx, sy, 8, 14, 0, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.strokeStyle = '#ffd84a';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            // Impact crack — 5 short yellow lines fanning forward
+            ctx.strokeStyle = 'rgba(255, 235, 100, 0.85)';
+            ctx.lineWidth = 2;
+            for (let k = 0; k < 5; k++) {
+              const ang = (k / 4 - 0.5) * Math.PI * 0.6;
+              const len = 14 + Math.random() * 4;
+              ctx.beginPath();
+              ctx.moveTo(sx, sy);
+              ctx.lineTo(sx + Math.cos(ang) * fwd * len, sy + Math.sin(ang) * len);
+              ctx.stroke();
+            }
+          }
+        }
+        // Shield Ride — silver shield disc under Drew's feet + rising gold sparks.
+        if (t === 'shieldRide') {
+          const elapsed = 26 - this.moveState.timer;
+          // Shield disc surfboard underneath
+          ctx.fillStyle = '#c0c8d4';
+          ctx.beginPath();
+          ctx.ellipse(this.cx, this.y + this.h + 4, 22, 6, 0, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.strokeStyle = '#ffd84a';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          // Rising gold sparks behind/below as he ascends
+          for (let k = 0; k < 3; k++) {
+            const ang = elapsed * 0.3 + (k / 3) * Math.PI * 2;
+            const px = this.cx + Math.sin(ang) * 14;
+            const py = this.y + this.h + 10 + k * 6;
+            ctx.fillStyle = `rgba(255, 216, 74, ${0.6 - k * 0.15})`;
+            ctx.beginPath();
+            ctx.arc(px, py, 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          if (Math.random() < 0.5) spawnEffect(this.cx + (Math.random()-0.5)*22, this.y + this.h + 12, '#ffd84a', 14, 6);
+        }
+        // Shield Spike — comet-like silver-gold body trail during the plunge.
+        if (t === 'shieldSpike') {
+          // Trail above as he plummets
+          ctx.fillStyle = 'rgba(255, 216, 74, 0.5)';
+          ctx.beginPath();
+          ctx.moveTo(this.x - 4, this.y - 8);
+          ctx.lineTo(this.x + this.w + 4, this.y - 8);
+          ctx.lineTo(this.cx, this.y - 30);
+          ctx.closePath();
+          ctx.fill();
+          ctx.fillStyle = 'rgba(192, 200, 212, 0.55)';
+          ctx.beginPath();
+          ctx.moveTo(this.x, this.y - 14);
+          ctx.lineTo(this.x + this.w, this.y - 14);
+          ctx.lineTo(this.cx, this.y - 38);
+          ctx.closePath();
+          ctx.fill();
+          // Sparks from feet showing the spike tip
+          if (Math.random() < 0.65) spawnEffect(this.cx + (Math.random()-0.5)*8, this.y + this.h + 2, '#ffd84a', 14, 6);
+        }
+
+        // -- WHITNEY POLISH --
+        // Sing — expanding concentric sound-wave rings + floating musical notes.
+        if (t === 'sing') {
+          const elapsed = 78 - this.moveState.timer;
+          const [a, b] = this.moveState.active;
+          // Throat glow during startup
+          if (elapsed < a) {
+            const grow = elapsed / a;
+            ctx.fillStyle = `rgba(255, 106, 191, ${0.3 + grow * 0.4})`;
+            ctx.beginPath();
+            ctx.arc(this.cx, this.y + 12, 5 + grow * 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          // Sound wave rings during active frames
+          if (elapsed >= a && elapsed <= b) {
+            const phase = elapsed - a;
+            for (let k = 0; k < 3; k++) {
+              const ringR = ((phase * 4 + k * 24) % 80) + 8;
+              const alpha = Math.max(0, 1 - ringR / 80);
+              ctx.strokeStyle = `rgba(255, 225, 74, ${alpha * 0.7})`;
+              ctx.lineWidth = 3;
+              ctx.beginPath();
+              ctx.arc(this.cx, this.cy, ringR, 0, Math.PI * 2);
+              ctx.stroke();
+              ctx.strokeStyle = `rgba(255, 106, 191, ${alpha * 0.5})`;
+              ctx.lineWidth = 1.5;
+              ctx.beginPath();
+              ctx.arc(this.cx, this.cy, ringR - 4, 0, Math.PI * 2);
+              ctx.stroke();
+            }
+            // Floating musical notes drifting up around her
+            ctx.fillStyle = '#ffe14a';
+            ctx.font = 'bold 14px sans-serif';
+            ctx.textAlign = 'center';
+            for (let k = 0; k < 3; k++) {
+              const noteX = this.cx + Math.sin(phase * 0.18 + k * 2) * 26;
+              const noteY = this.cy - 14 - ((phase * 2 + k * 12) % 36);
+              const opacity = Math.max(0, 1 - ((phase * 2 + k * 12) % 36) / 36);
+              ctx.fillStyle = `rgba(255, 225, 74, ${opacity})`;
+              ctx.fillText(k % 2 === 0 ? '♪' : '♫', noteX, noteY);
+            }
+            ctx.textAlign = 'left';
+          }
+        }
+        // Dragon Claw — 3 layered slash trails fanning forward + dragon-orange glow.
+        if (t === 'dragonClaw') {
+          const elapsed = 18 - this.moveState.timer;
+          const [a, b] = this.moveState.active;
+          if (elapsed >= a && elapsed <= b) {
+            const fwd = this.facing;
+            const sx = this.cx + fwd * 4;
+            const sy = this.cy;
+            const ex = this.cx + fwd * 50;
+            // 3 slash arcs at different heights
+            for (let k = 0; k < 3; k++) {
+              const yOff = (k - 1) * 10;
+              ctx.strokeStyle = `rgba(255, 106, 191, ${0.7 - k * 0.15})`;
+              ctx.lineWidth = 4;
+              ctx.beginPath();
+              ctx.moveTo(sx, sy + yOff - 4);
+              ctx.quadraticCurveTo(this.cx + fwd * 20, sy + yOff + 8, ex, sy + yOff);
+              ctx.stroke();
+              ctx.strokeStyle = `rgba(255, 225, 74, ${0.55 - k * 0.12})`;
+              ctx.lineWidth = 2;
+              ctx.stroke();
+            }
+            // Claw glow at start
+            ctx.fillStyle = 'rgba(255, 106, 191, 0.6)';
+            ctx.beginPath();
+            ctx.arc(sx, sy, 8, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        // Lightning Jump — yellow bolt body trail + jagged sparks during ascent.
+        if (t === 'lightningJump') {
+          const elapsed = 24 - this.moveState.timer;
+          if (elapsed < 14) {
+            // Yellow electric outline around her body
+            const flicker = Math.sin(elapsed * 1.5) * 0.2 + 0.6;
+            ctx.strokeStyle = `rgba(255, 235, 74, ${flicker})`;
+            ctx.lineWidth = 3;
+            ctx.strokeRect(this.x - 4, this.y - 4, this.w + 8, this.h + 8);
+            // Jagged bolt zig-zags above her head
+            ctx.strokeStyle = '#ffeb3b';
+            ctx.lineWidth = 2;
+            ctx.beginPath();
+            let by = this.y - 4;
+            let bx = this.cx + (Math.random() - 0.5) * 6;
+            ctx.moveTo(bx, by);
+            for (let k = 0; k < 4; k++) {
+              by -= 6;
+              bx += (Math.random() - 0.5) * 14;
+              ctx.lineTo(bx, by);
+            }
+            ctx.stroke();
+            // Spark particles flying off
+            if (Math.random() < 0.7) {
+              spawnEffect(this.cx + (Math.random()-0.5)*this.w, this.cy + (Math.random()-0.5)*this.h, '#ffeb3b', 12, 6);
+            }
+          }
+        }
+        // Stockpile Toss — bag-rummaging pose during windup + item floating up briefly.
+        if (t === 'animalThrow' && this.moveState.timer > 14) {
+          const elapsed = 22 - this.moveState.timer;
+          const fwd = this.facing;
+          // Pull-out arm with item rising from "behind" her
+          const itemX = this.cx + fwd * 6;
+          const itemY = this.cy - 4 - elapsed * 1.5;
+          ctx.strokeStyle = '#ffddba';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(this.cx, this.cy);
+          ctx.lineTo(itemX, itemY + 4);
+          ctx.stroke();
+          // Mystery item sparkle (don't reveal rock vs potion until it actually spawns)
+          ctx.fillStyle = '#ff6abf';
+          ctx.beginPath();
+          ctx.arc(itemX, itemY, 5, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffe14a';
+          ctx.beginPath();
+          ctx.arc(itemX, itemY, 2.5, 0, Math.PI * 2);
+          ctx.fill();
+          // Rummage sparkles behind her
+          if (Math.random() < 0.4) spawnEffect(this.cx + (Math.random()-0.5)*30, this.cy + 8, '#ffe14a', 14, 6);
+        }
+
         // Ultimate Upper — wide upward arc trail + golden lift sparks.
         if (t === 'ultUpper') {
           const fwd = this.facing;
