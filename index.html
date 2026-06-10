@@ -5771,6 +5771,296 @@
             }
           }
         }
+
+        // -- LIAM POLISH --
+        // Ski Pole Throw — arm pulled back with the pole during anticipation,
+        // then thrust forward during release.
+        if (t === 'skiPoleThrow') {
+          const elapsed = 22 - this.moveState.timer;
+          const fwd = this.facing;
+          if (elapsed < 6) {
+            // Anticipation: pole held back behind body
+            const grow = elapsed / 6;
+            const sx = this.cx - fwd * (10 + grow * 4);
+            const sy = this.cy - 4 - grow * 2;
+            ctx.strokeStyle = '#88ddff';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(sx, sy);
+            ctx.lineTo(sx - fwd * 24, sy - 12);
+            ctx.stroke();
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 2;
+            ctx.stroke();
+            // Cold breath wisp at body
+            if (Math.random() < 0.4) spawnEffect(this.cx, this.cy - 14, '#ffffff', 12, 5);
+          } else {
+            // Release: pole forward, frost trail
+            const px = this.cx + fwd * 18;
+            const py = this.cy - 4;
+            ctx.strokeStyle = '#ffffff';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.cy - 2);
+            ctx.lineTo(px, py);
+            ctx.stroke();
+            if (Math.random() < 0.6) spawnEffect(px, py, '#88ddff', 10, 6);
+          }
+        }
+        // Snow Blast — upward fountain of snow at his hands + frosty hair-wisps.
+        if (t === 'snowBlast') {
+          const elapsed = 24 - this.moveState.timer;
+          if (elapsed < 6) {
+            // Hand burst forward of his body
+            const grow = elapsed / 5;
+            ctx.fillStyle = `rgba(136, 221, 255, ${0.6 + grow * 0.3})`;
+            ctx.beginPath();
+            ctx.arc(this.cx, this.cy - 10, 6 + grow * 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = `rgba(255, 255, 255, ${0.5 + grow * 0.4})`;
+            ctx.beginPath();
+            ctx.arc(this.cx, this.cy - 10, 3 + grow * 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          // Frost wisps drifting up around him during the move
+          if (Math.random() < 0.6) {
+            spawnEffect(this.cx + (Math.random()-0.5) * this.w, this.cy + (Math.random()-0.5) * 16, '#ffffff', 16, 6);
+          }
+        }
+        // Avalanche channeling — pole pointed skyward with chilling aura.
+        if (t === 'avalanche') {
+          const elapsed = 36 - this.moveState.timer;
+          // Pole upward from Liam's hand to overhead
+          ctx.strokeStyle = '#88ddff';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(this.cx + this.facing * 4, this.cy - 4);
+          ctx.lineTo(this.cx + this.facing * 8, this.y - 30);
+          ctx.stroke();
+          ctx.strokeStyle = '#ffffff';
+          ctx.lineWidth = 2;
+          ctx.stroke();
+          // Pulsing white-blue aura at the pole tip
+          const pulse = 0.4 + Math.sin(elapsed * 0.4) * 0.2;
+          ctx.fillStyle = `rgba(136, 221, 255, ${pulse})`;
+          ctx.beginPath();
+          ctx.arc(this.cx + this.facing * 8, this.y - 30, 8 + Math.sin(elapsed * 0.3) * 2, 0, Math.PI * 2);
+          ctx.fill();
+          // Frost particles drifting around Liam
+          if (Math.random() < 0.5) {
+            spawnEffect(this.cx + (Math.random()-0.5) * 36, this.cy + (Math.random()-0.5) * 30, '#ffffff', 18, 5);
+          }
+        }
+
+        // -- COLTON POLISH --
+        // Pool Ball Windup — cradled ball with growing yellow charge glow.
+        if (t === 'poolBallWindup') {
+          const elapsed = 48 - this.moveState.timer;
+          const fwd = this.facing;
+          // Stance: ball cradled in front-low arm
+          const bx = this.cx + fwd * 12;
+          const by = this.cy + 6;
+          ctx.strokeStyle = '#ffddba';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(this.cx, this.cy);
+          ctx.lineTo(bx, by);
+          ctx.stroke();
+          // Growing charge glow as windup progresses (max around frame 28-30, then release)
+          const grow = Math.min(1, elapsed / 28);
+          if (elapsed < 30) {
+            ctx.fillStyle = `rgba(255, 235, 74, ${0.35 + grow * 0.45})`;
+            ctx.beginPath();
+            ctx.arc(bx, by, 8 + grow * 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = `rgba(255, 255, 255, ${0.4 * grow})`;
+            ctx.beginPath();
+            ctx.arc(bx, by, 4 + grow * 3, 0, Math.PI * 2);
+            ctx.fill();
+            // Charge sparks circling the ball when nearly full
+            if (grow > 0.7) {
+              ctx.fillStyle = '#ffffff';
+              for (let k = 0; k < 4; k++) {
+                const ang = elapsed * 0.3 + (k / 4) * Math.PI * 2;
+                const r = 12;
+                ctx.beginPath();
+                ctx.arc(bx + Math.cos(ang) * r, by + Math.sin(ang) * r * 0.6, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+          }
+        }
+        // Eight Ball drop — short windup pose with a smoke wisp on release.
+        if (t === 'eightBallSet') {
+          const elapsed = 22 - this.moveState.timer;
+          const fwd = this.facing;
+          if (elapsed >= 6 && elapsed <= 10) {
+            // brief smoke at hand on release
+            if (Math.random() < 0.6) spawnEffect(this.cx + fwd * 18, this.cy - 4, '#888888', 14, 5);
+          }
+        }
+        // Jump Shot — visible pool cue extending below Colton as he vaults upward.
+        if (t === 'jumpShot') {
+          const elapsed = 24 - this.moveState.timer;
+          // Cue pointing downward (pole-vault style)
+          ctx.strokeStyle = '#8a5a2a';
+          ctx.lineWidth = 5;
+          ctx.beginPath();
+          ctx.moveTo(this.cx, this.cy);
+          ctx.lineTo(this.cx, this.cy + 36);
+          ctx.stroke();
+          ctx.strokeStyle = '#ffe14a';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.moveTo(this.cx, this.cy + 32);
+          ctx.lineTo(this.cx, this.cy + 38);
+          ctx.stroke();
+          // Wood dust at takeoff frame
+          if (elapsed < 4 && Math.random() < 0.7) {
+            spawnEffect(this.cx + (Math.random()-0.5)*14, this.cy + 36, '#8a5a2a', 14, 6);
+          }
+        }
+        // Flashing Mach Spear — pulsing speed lines around Colton while the
+        // invisible pulses are firing (frames 6-30), big yellow flash on finisher.
+        if (t === 'flashSpear') {
+          const elapsed = 52 - this.moveState.timer;
+          const fwd = this.facing;
+          if (elapsed >= 6 && elapsed < 32) {
+            // Five quick pulses — flicker speed lines around the spear path.
+            ctx.strokeStyle = `rgba(255, 225, 74, ${0.3 + Math.sin(elapsed * 0.8) * 0.2})`;
+            ctx.lineWidth = 1.5;
+            for (let k = 0; k < 3; k++) {
+              const y = this.cy - 6 + k * 8;
+              ctx.beginPath();
+              ctx.moveTo(this.cx + fwd * 18, y);
+              ctx.lineTo(this.cx + fwd * 44, y);
+              ctx.stroke();
+            }
+          } else if (elapsed >= 38 && elapsed < 46) {
+            // Finisher: visible bright spear thrust
+            const t01 = (elapsed - 38) / 8;
+            ctx.fillStyle = `rgba(255, 225, 74, ${1 - t01 * 0.7})`;
+            ctx.fillRect(this.cx + fwd * 12, this.cy - 4, 60, 12);
+            ctx.fillStyle = `rgba(255, 255, 255, ${1 - t01 * 0.5})`;
+            ctx.fillRect(this.cx + fwd * 16, this.cy - 1, 52, 6);
+          }
+        }
+
+        // -- DONNY POLISH --
+        // Power Punch — heavy windup pose (arm cocked far back with growing
+        // gold knuckle glow), then big impact crack on connect.
+        if (t === 'powerPunchD') {
+          const elapsed = 50 - this.moveState.timer;
+          const fwd = this.facing;
+          if (elapsed < 30) {
+            // Windup: deep arm cock with growing knuckle glow.
+            const grow = Math.min(1, elapsed / 28);
+            const palmX = this.cx - fwd * (12 + grow * 8);
+            const palmY = this.cy + 4 - grow * 4;
+            ctx.strokeStyle = '#ffddba';
+            ctx.lineWidth = 5;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.cy);
+            ctx.lineTo(palmX, palmY);
+            ctx.stroke();
+            ctx.fillStyle = `rgba(255, 235, 59, ${0.4 + grow * 0.5})`;
+            ctx.beginPath();
+            ctx.arc(palmX, palmY, 6 + grow * 7, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = `rgba(200, 48, 48, ${0.55 * grow})`;
+            ctx.beginPath();
+            ctx.arc(palmX, palmY, 10 + grow * 10, 0, Math.PI * 2);
+            ctx.fill();
+            // Armor sparks when super armor is active
+            if (this.armor > 0) {
+              ctx.fillStyle = '#ffeb3b';
+              for (let k = 0; k < 4; k++) {
+                const ang = this.animTick * 0.25 + (k / 4) * Math.PI * 2;
+                ctx.beginPath();
+                ctx.arc(this.cx + Math.cos(ang) * this.w * 0.9, this.cy + Math.sin(ang) * this.h * 0.6, 2.5, 0, Math.PI * 2);
+                ctx.fill();
+              }
+            }
+          } else {
+            // Active: extended arm with bright gold fist + radiating crack lines.
+            const hb = this.getHitbox();
+            if (hb) {
+              const fistX = fwd === 1 ? hb.x + hb.w - 8 : hb.x + 8;
+              const fistY = hb.y + hb.h/2;
+              ctx.strokeStyle = '#ffddba';
+              ctx.lineWidth = 6;
+              ctx.beginPath();
+              ctx.moveTo(this.cx, this.cy);
+              ctx.lineTo(fistX, fistY);
+              ctx.stroke();
+              ctx.fillStyle = '#c83030';
+              ctx.beginPath();
+              ctx.arc(fistX, fistY, 12, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = '#ffeb3b';
+              ctx.beginPath();
+              ctx.arc(fistX, fistY, 8, 0, Math.PI * 2);
+              ctx.fill();
+              ctx.fillStyle = '#ffffff';
+              ctx.beginPath();
+              ctx.arc(fistX - fwd * 2, fistY - 2, 3.5, 0, Math.PI * 2);
+              ctx.fill();
+              // Crack lines fanning forward from the fist
+              ctx.strokeStyle = 'rgba(255, 235, 59, 0.85)';
+              ctx.lineWidth = 2;
+              for (let k = 0; k < 6; k++) {
+                const ang = (k / 5 - 0.5) * Math.PI * 0.7;
+                const len = 16 + Math.random() * 6;
+                ctx.beginPath();
+                ctx.moveTo(fistX, fistY);
+                ctx.lineTo(fistX + Math.cos(ang) * fwd * len, fistY + Math.sin(ang) * len);
+                ctx.stroke();
+              }
+            }
+          }
+        }
+        // Power Dropkick — speed lines + boot silhouette during the leap.
+        if (t === 'dropkick') {
+          const fwd = this.facing;
+          ctx.strokeStyle = 'rgba(255, 235, 59, 0.55)';
+          ctx.lineWidth = 2;
+          for (let k = 0; k < 4; k++) {
+            const y = this.cy - 6 + k * 6;
+            ctx.beginPath();
+            ctx.moveTo(this.cx - fwd * 12, y);
+            ctx.lineTo(this.cx - fwd * (24 + k * 4), y);
+            ctx.stroke();
+          }
+          // Bright boot tip up front
+          ctx.fillStyle = '#c83030';
+          ctx.beginPath();
+          ctx.arc(this.cx + fwd * 22, this.cy + 16, 6, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.fillStyle = '#ffeb3b';
+          ctx.beginPath();
+          ctx.arc(this.cx + fwd * 22, this.cy + 16, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
+        // Ultimate Upper — wide upward arc trail + golden lift sparks.
+        if (t === 'ultUpper') {
+          const fwd = this.facing;
+          // Arc curve trail above head
+          ctx.strokeStyle = 'rgba(255, 235, 59, 0.65)';
+          ctx.lineWidth = 4;
+          ctx.beginPath();
+          ctx.moveTo(this.x - 8, this.y + this.h);
+          ctx.quadraticCurveTo(this.cx + fwd * 4, this.y - 32, this.x + this.w + 8, this.y + this.h);
+          ctx.stroke();
+          // Rising sparks
+          for (let k = 0; k < 4; k++) {
+            const px = this.cx + (k - 1.5) * 10;
+            const py = this.y - 4 - (this.animTick + k * 5) % 30;
+            ctx.fillStyle = `rgba(255, 235, 59, ${0.7 - (py / 30) * 0.3})`;
+            ctx.beginPath();
+            ctx.arc(px, py, 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
       }
 
       ctx.globalAlpha = 1;
