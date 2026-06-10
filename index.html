@@ -2187,8 +2187,21 @@
         if (this.moveState.type === 'burnDash') {
           this.vx = this.facing * 11;
           this.vy = Math.min(this.vy, 1);
-          // spawn fire trail
-          if (Math.random() < 0.7) spawnEffect(this.cx - this.facing * 10, this.cy + 10, '#ff6a2a', 14, 10);
+          const elapsed = 22 - this.moveState.timer;
+          // Frame-0 anticipation burst — yellow-white gather as Nico ignites.
+          if (elapsed < 3) {
+            const grow = 1 - elapsed / 3;
+            spawnEffect(this.cx, this.cy, '#ffeb3b', 16, 18 + grow * 10);
+            spawnEffect(this.cx + this.facing * 4, this.cy, '#ffffff', 10, 10 + grow * 8);
+          }
+          // Layered fire trail — orange core, yellow heat, black smoke wake.
+          if (Math.random() < 0.85) spawnEffect(this.cx - this.facing * 10, this.cy + 10, '#ff6a2a', 14, 12);
+          if (Math.random() < 0.65) spawnEffect(this.cx - this.facing * 18, this.cy + (Math.random()-0.5)*14, '#ffaa33', 12, 10);
+          if (Math.random() < 0.45) spawnEffect(this.cx - this.facing * 22, this.cy + 4, '#222222', 16, 9);
+          // Ground dust skim when on the floor.
+          if (this.onGround && Math.random() < 0.6) {
+            spawnEffect(this.cx - this.facing * 6, this.y + this.h - 2, '#6a4a2a', 10, 8);
+          }
         }
         if (this.moveState.type === 'fireUp') {
           if (Math.random() < 0.8) spawnEffect(this.cx, this.y + this.h, '#ffaa33', 14, 10);
@@ -2243,6 +2256,11 @@
           else if (frameKeys[ctrl.right]) { this.vx = Math.min(this.vx + 0.3, 4.5); this.facing = 1; }
           // Wing flap visual
           if (Math.random() < 0.4) spawnEffect(this.cx + (Math.random()-0.5)*30, this.cy + 4, '#a0e0d0', 12, 10);
+          // Wind-trail particles behind Jonah while gliding — layered teal + pink wisps.
+          if (Math.abs(this.vx) > 1) {
+            if (Math.random() < 0.55) spawnEffect(this.cx - this.facing * 22, this.cy + (Math.random()-0.5)*16, '#a0e0d0', 18, 6);
+            if (Math.random() < 0.35) spawnEffect(this.cx - this.facing * 28, this.cy + (Math.random()-0.5)*20, '#e070b0', 16, 4);
+          }
         }
         // Jonah: Beet Snatch — once a victim is grabbed, hold them in front
         // of Jonah and let the player mash the attack key for damage. After
@@ -2347,14 +2365,23 @@
         if (this.moveState && this.moveState.type === 'ultraSpike') {
           this.vx = 0;
           this.vy = Math.min(this.vy + 1.2, 22);   // accelerate downward hard
-          // Red-pink streak
-          if (Math.random() < 0.7) spawnEffect(this.cx + (Math.random()-0.5)*20, this.y - 6, '#e070b0', 12, 10);
+          // Layered comet plume — pink streak + teal core + grey smoke wake.
+          if (Math.random() < 0.85) spawnEffect(this.cx + (Math.random()-0.5)*22, this.y - 6, '#e070b0', 14, 12);
+          if (Math.random() < 0.6) spawnEffect(this.cx + (Math.random()-0.5)*14, this.y - 14, '#a0e0d0', 12, 8);
+          if (Math.random() < 0.4) spawnEffect(this.cx + (Math.random()-0.5)*26, this.y - 22, '#888888', 18, 6);
           // Bounce on first ground contact
           if (this.onGround && !this.moveState.bounced) {
             this.moveState.bounced = true;
             this.vy = -12;
-            spawnEffect(this.cx, this.y + this.h, '#e070b0', 22, 32);
-            spawnEffect(this.cx, this.y + this.h, '#a0e0d0', 18, 36);
+            // Bigger landing burst — three layered rings of dust + petals.
+            spawnEffect(this.cx, this.y + this.h, '#ffffff', 18, 28);
+            spawnEffect(this.cx, this.y + this.h, '#e070b0', 24, 40);
+            spawnEffect(this.cx, this.y + this.h, '#a0e0d0', 20, 46);
+            // Side-spray petals
+            for (let k = -2; k <= 2; k++) {
+              if (k === 0) continue;
+              spawnEffect(this.cx + k * 14, this.y + this.h - 2, '#e070b0', 18, 8);
+            }
             // Refund a jump so they can act after the bounce
             this.jumps = Math.max(this.jumps - 1, 0);
             // End the move on bounce so Jonah regains control
@@ -3936,14 +3963,33 @@
         }
       }
 
-      // Counter ring
+      // Counter ring — pulsing double-ring with orbiting spark dots.
       if (this.counterActive > 0) {
-        ctx.strokeStyle = this.key === 'nico' ? '#ffaa33' : '#b088ff';
+        const isNicoCounter = this.key === 'nico';
+        const outer = isNicoCounter ? '#ffaa33' : '#b088ff';
+        const inner = isNicoCounter ? '#ffeb3b' : '#e8e8ff';
+        const t = this.counterActive;
+        const pulse = 1 + Math.sin(t * 0.35) * 0.08;
+        ctx.globalAlpha = 0.75;
+        ctx.strokeStyle = outer;
         ctx.lineWidth = 3;
-        ctx.globalAlpha = 0.7;
         ctx.beginPath();
-        ctx.arc(this.cx, this.cy, 42, 0, Math.PI * 2);
+        ctx.arc(this.cx, this.cy, 42 * pulse, 0, Math.PI * 2);
         ctx.stroke();
+        ctx.strokeStyle = inner;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(this.cx, this.cy, 34 * pulse, 0, Math.PI * 2);
+        ctx.stroke();
+        // 5 orbiting spark dots
+        ctx.fillStyle = inner;
+        for (let k = 0; k < 5; k++) {
+          const ang = t * 0.18 + (k / 5) * Math.PI * 2;
+          const r = 42 * pulse;
+          ctx.beginPath();
+          ctx.arc(this.cx + Math.cos(ang) * r, this.cy + Math.sin(ang) * r, 3, 0, Math.PI * 2);
+          ctx.fill();
+        }
         ctx.globalAlpha = 1;
       }
 
@@ -4127,6 +4173,20 @@
       if (this.moveState) {
         const t = this.moveState.type;
         if (t === 'katanaUp') {
+          // After-image blade trail — 3 fading ghost katanas behind the current sweep.
+          const dashElapsed = 24 - this.moveState.timer;
+          for (let g = 3; g >= 1; g--) {
+            const yOff = g * 12; // ghosts trail downward (where Nico was a few frames ago)
+            ctx.globalAlpha = 0.18 + (3 - g) * 0.06;
+            ctx.strokeStyle = '#b088ff';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.y + 10 + yOff);
+            ctx.lineTo(this.cx + this.facing * 8, this.y - 30 + yOff);
+            ctx.stroke();
+          }
+          ctx.globalAlpha = 1;
+          // Primary blade — bright with white-hot core
           ctx.strokeStyle = '#e8e8ff';
           ctx.lineWidth = 4;
           ctx.beginPath();
@@ -4136,6 +4196,72 @@
           ctx.strokeStyle = '#b088ff';
           ctx.lineWidth = 2;
           ctx.stroke();
+          // Takeoff burst on the first few frames — purple flash at feet.
+          if (dashElapsed < 4) {
+            const grow = 1 - dashElapsed / 4;
+            ctx.fillStyle = `rgba(176, 136, 255, ${grow * 0.55})`;
+            ctx.beginPath();
+            ctx.arc(this.cx, this.y + this.h - 2, 14 + grow * 10, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        // Derek: Shuriken cast — arm pull-back anticipation, then forward flick.
+        if (t === 'shuriken') {
+          const elapsed = 16 - this.moveState.timer;
+          const fwd = this.facing;
+          if (elapsed < 5) {
+            // Anticipation: arm pulled back behind body, small grey gather at palm.
+            const palmX = this.cx - fwd * 12;
+            const palmY = this.cy - 6;
+            const grow = elapsed / 5;
+            ctx.strokeStyle = '#ffddba';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.cy - 2);
+            ctx.lineTo(palmX, palmY);
+            ctx.stroke();
+            ctx.fillStyle = `rgba(207, 216, 232, ${0.5 + grow * 0.4})`;
+            ctx.beginPath();
+            ctx.arc(palmX, palmY, 3 + grow * 3, 0, Math.PI * 2);
+            ctx.fill();
+          } else {
+            // Throw motion: arm forward, palm trailing, small smoke wisp.
+            const palmX = this.cx + fwd * 14;
+            const palmY = this.cy - 4;
+            ctx.strokeStyle = '#ffddba';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.cy - 2);
+            ctx.lineTo(palmX, palmY);
+            ctx.stroke();
+            ctx.fillStyle = 'rgba(176, 136, 255, 0.35)';
+            ctx.beginPath();
+            ctx.arc(palmX, palmY, 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        // Derek: Crossbow — bow draw pose during the windup.
+        if (t === 'crossbow') {
+          const elapsed = 20 - this.moveState.timer;
+          const fwd = this.facing;
+          // Bow arm forward, drawing string back to chest.
+          ctx.strokeStyle = '#5a3a18';
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.moveTo(this.cx, this.cy - 2);
+          ctx.lineTo(this.cx + fwd * 16, this.cy - 4);
+          ctx.stroke();
+          // Drawn string — pulled back during the windup, releases on the throw.
+          if (elapsed < 6) {
+            const pull = elapsed / 6;
+            ctx.strokeStyle = '#cfd8e8';
+            ctx.lineWidth = 1.5;
+            ctx.beginPath();
+            ctx.moveTo(this.cx + fwd * 16, this.cy - 10);
+            ctx.lineTo(this.cx + fwd * (12 - pull * 6), this.cy - 4);
+            ctx.lineTo(this.cx + fwd * 16, this.cy + 2);
+            ctx.stroke();
+          }
         }
         if (t === 'counter') {
           ctx.strokeStyle = this.key === 'nico' ? '#ff6a2a' : '#4ab8ff';
@@ -4190,41 +4316,110 @@
             ctx.stroke();
           }
         }
-        // Rhys: Toxic Tendril — draw the vine extending from his hand toward
-        // the projectile tip while it's in flight.
+        // Rhys: Toxic Tendril — wavy snake-vine extending from his hand to the
+        // projectile tip, with drips falling along its length.
         if (t === 'toxicTendril') {
           const proj = projectiles.find(pp => pp.type === 'tendril' && pp.owner === this);
           const sx = this.cx + this.facing * 6;
           const sy = this.cy + 4;
           const ex = proj ? proj.x + proj.w/2 : this.cx + this.facing * (40 + (24 - this.moveState.timer) * 6);
           const ey = proj ? proj.y + proj.h/2 : this.cy + 4;
-          // Thick green vine
+          // Build a wavy path: 8 segments with a sinusoidal sway perpendicular to the vine.
+          const segs = 10;
+          const dx = ex - sx, dy = ey - sy;
+          const len = Math.hypot(dx, dy) || 1;
+          // Perpendicular unit vector
+          const px = -dy / len, py = dx / len;
+          const phase = this.moveState.timer * 0.5;
+          const points = [];
+          for (let i = 0; i <= segs; i++) {
+            const u = i / segs;
+            // Sway amplitude tapers to 0 at both ends so the hand + projectile anchor cleanly.
+            const taper = Math.sin(u * Math.PI);
+            const sway = Math.sin(u * Math.PI * 3 + phase) * 6 * taper;
+            points.push([sx + dx * u + px * sway, sy + dy * u + py * sway]);
+          }
+          // Thick outer vine
           ctx.strokeStyle = '#5aaf3a';
           ctx.lineWidth = 5;
+          ctx.lineJoin = 'round';
           ctx.beginPath();
-          ctx.moveTo(sx, sy);
-          ctx.lineTo(ex, ey);
+          ctx.moveTo(points[0][0], points[0][1]);
+          for (let i = 1; i < points.length; i++) ctx.lineTo(points[i][0], points[i][1]);
           ctx.stroke();
           // Inner highlight
           ctx.strokeStyle = '#b6ff6a';
           ctx.lineWidth = 2;
           ctx.stroke();
+          // Drips along the vine — small green dots that occasionally fall off.
+          if (Math.random() < 0.5) {
+            const i = 1 + Math.floor(Math.random() * (points.length - 2));
+            spawnEffect(points[i][0], points[i][1] + 2, '#5aaf3a', 14, 4);
+          }
         }
-        // Rhys: Toxic Punch — draw a big punch hitbox with green glow
+        // Rhys: Toxic Punch — windup pose during startup, then swing during active.
         if (t === 'toxPunch') {
+          const elapsed = 24 - this.moveState.timer;
+          const fwd = this.facing;
           const hb = this.getHitbox();
-          if (hb) {
+          if (!hb && elapsed < 6) {
+            // ANTICIPATION (frames 0-5): arm cocked back, building green knuckle glow.
+            const grow = elapsed / 5;
+            const palmX = this.cx - fwd * 14;
+            const palmY = this.cy + 2;
+            // Cocked arm line
+            ctx.strokeStyle = '#ffddba';
+            ctx.lineWidth = 4;
+            ctx.beginPath();
+            ctx.moveTo(this.cx, this.cy);
+            ctx.lineTo(palmX, palmY);
+            ctx.stroke();
+            // Knuckle glow growing
+            ctx.fillStyle = `rgba(182, 255, 106, ${0.35 + grow * 0.45})`;
+            ctx.beginPath();
+            ctx.arc(palmX, palmY, 4 + grow * 6, 0, Math.PI * 2);
+            ctx.fill();
+            ctx.fillStyle = `rgba(90, 175, 58, ${0.55 * grow})`;
+            ctx.beginPath();
+            ctx.arc(palmX, palmY, 7 + grow * 8, 0, Math.PI * 2);
+            ctx.fill();
+            // Drip particles falling off the gathering venom
+            if (Math.random() < 0.4) spawnEffect(palmX + (Math.random()-0.5)*6, palmY + 6, '#5aaf3a', 10, 5);
+          } else if (hb) {
+            // ACTIVE: big punch hitbox with layered green glow + splatter burst.
             ctx.fillStyle = 'rgba(90, 175, 58, 0.55)';
             ctx.fillRect(hb.x, hb.y, hb.w, hb.h);
             ctx.strokeStyle = '#b6ff6a';
             ctx.lineWidth = 3;
             ctx.strokeRect(hb.x, hb.y, hb.w, hb.h);
-            // impact burst
-            ctx.fillStyle = '#b6ff6a';
-            const bx = this.facing === 1 ? hb.x + hb.w : hb.x;
+            // Forward-extended arm — punching arm from body to fist
+            const fistX = fwd === 1 ? hb.x + hb.w - 8 : hb.x + 8;
+            const fistY = hb.y + hb.h/2;
+            ctx.strokeStyle = '#ffddba';
+            ctx.lineWidth = 5;
             ctx.beginPath();
-            ctx.arc(bx, hb.y + hb.h/2, 6, 0, Math.PI*2);
+            ctx.moveTo(this.cx, this.cy);
+            ctx.lineTo(fistX, fistY);
+            ctx.stroke();
+            // Fist core — bright green-yellow knuckle
+            ctx.fillStyle = '#b6ff6a';
+            ctx.beginPath();
+            ctx.arc(fistX, fistY, 7, 0, Math.PI * 2);
             ctx.fill();
+            ctx.fillStyle = '#ffffff';
+            ctx.beginPath();
+            ctx.arc(fistX - fwd * 2, fistY - 2, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+            // Splatter sparks radiating forward
+            ctx.fillStyle = 'rgba(182, 255, 106, 0.7)';
+            for (let k = 0; k < 4; k++) {
+              const ang = (k / 4) * Math.PI - Math.PI/2;
+              const sx = fistX + Math.cos(ang) * fwd * 12;
+              const sy = fistY + Math.sin(ang) * 12;
+              ctx.beginPath();
+              ctx.arc(sx, sy, 2.5, 0, Math.PI * 2);
+              ctx.fill();
+            }
           }
         }
         // Greyson: Hard Punch — chunky impact box with shockwave
@@ -4824,6 +5019,46 @@
           }
         }
 
+        // Hard Punch active — radiating crack lines + impact splash on the fist tip.
+        if (t === 'hardPunch') {
+          const hb = this.getHitbox();
+          if (hb) {
+            const fx = this.facing === 1 ? hb.x + hb.w - 6 : hb.x + 6;
+            const fy = hb.y + hb.h/2;
+            // 6 short radiating crack lines fanning forward.
+            ctx.strokeStyle = 'rgba(255, 235, 100, 0.85)';
+            ctx.lineWidth = 2;
+            for (let k = 0; k < 6; k++) {
+              const ang = (k / 5 - 0.5) * Math.PI * 0.6;
+              const len = 14 + Math.random() * 6;
+              ctx.beginPath();
+              ctx.moveTo(fx, fy);
+              ctx.lineTo(fx + Math.cos(ang) * this.facing * len, fy + Math.sin(ang) * len);
+              ctx.stroke();
+            }
+            // White hot core flash at fist
+            ctx.fillStyle = 'rgba(255, 255, 240, 0.85)';
+            ctx.beginPath();
+            ctx.arc(fx, fy, 4, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        // Mega Jump armor aura — yellow ring around Greyson during the
+        // breakable super-armor window (first ~10 frames after takeoff).
+        if (t === 'megaJump' && this.armor > 0) {
+          const a = 0.35 + Math.sin(this.armor * 0.4) * 0.18;
+          ctx.strokeStyle = `rgba(212, 199, 122, ${a})`;
+          ctx.lineWidth = 3;
+          ctx.beginPath();
+          ctx.ellipse(this.cx, this.cy, this.w * 0.95, this.h * 0.7, 0, 0, Math.PI * 2);
+          ctx.stroke();
+          ctx.strokeStyle = `rgba(255, 235, 59, ${a * 0.6})`;
+          ctx.lineWidth = 1.5;
+          ctx.beginPath();
+          ctx.ellipse(this.cx, this.cy, this.w * 0.75, this.h * 0.55, 0, 0, Math.PI * 2);
+          ctx.stroke();
+        }
+
         // -- KELE POLISH --
         // Suplex pre-grab stomp — heavy step forward dust cloud
         if (t === 'suplex' && !this.moveState.grabbed) {
@@ -4849,6 +5084,54 @@
             ctx.lineTo(this.cx + dx + 4, this.y + this.h + 4 + Math.sin(this.animTick * 0.3 + k) * 1.5);
             ctx.stroke();
           }
+        }
+        // Power Punch armor sparks — 6 orbiting gold dots while super armor is active.
+        if (t === 'powerPunch' && this.armor > 0) {
+          ctx.fillStyle = '#f0d050';
+          for (let k = 0; k < 6; k++) {
+            const ang = this.animTick * 0.18 + (k / 6) * Math.PI * 2;
+            const rx = this.w * 0.95;
+            const ry = this.h * 0.65;
+            ctx.beginPath();
+            ctx.arc(this.cx + Math.cos(ang) * rx, this.cy + Math.sin(ang) * ry, 2.5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        // Uppercut launch — rising trail sparks at Kele's feet for the first few frames.
+        if (t === 'uppercut' && (28 - this.moveState.timer) < 8) {
+          const age = 28 - this.moveState.timer;
+          ctx.fillStyle = `rgba(240, 208, 80, ${0.7 - age * 0.08})`;
+          for (let k = 0; k < 4; k++) {
+            const px = this.cx + (k - 1.5) * 8;
+            const py = this.y + this.h + 4 + k * 2;
+            ctx.beginPath();
+            ctx.arc(px, py, 3 + Math.random() * 2, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          // Bright gold glow under his feet on frame 0
+          if (age < 3) {
+            const grow = 1 - age / 3;
+            ctx.fillStyle = `rgba(255, 235, 59, ${grow * 0.65})`;
+            ctx.beginPath();
+            ctx.arc(this.cx, this.y + this.h, 16 + grow * 6, 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        // Body Slam drop — vertical red speed lines flanking Kele during the plunge.
+        if (t === 'bodySlam' && this.moveState.phase === 'drop') {
+          ctx.strokeStyle = 'rgba(163, 64, 64, 0.55)';
+          ctx.lineWidth = 2;
+          for (let k = 0; k < 3; k++) {
+            const off = (k + 1) * 10;
+            ctx.beginPath();
+            ctx.moveTo(this.x - off, this.cy - 4);
+            ctx.lineTo(this.x - off, this.cy + 14);
+            ctx.moveTo(this.x + this.w + off, this.cy - 4);
+            ctx.lineTo(this.x + this.w + off, this.cy + 14);
+            ctx.stroke();
+          }
+          // Trailing red embers above as he plummets
+          if (Math.random() < 0.6) spawnEffect(this.cx + (Math.random()-0.5)*this.w, this.y - 8, '#a34040', 14, 6);
         }
 
         // -- THEO POLISH --
@@ -5976,8 +6259,26 @@
         p.tick = (p.tick || 0) + 1;
       }
       if (p.type === 'shuriken') p.spin += 0.5;
-      if (p.type === 'fireball') p.wobble += 0.4;
+      if (p.type === 'fireball') {
+        p.wobble += 0.4;
+        // Flame trail — 3 layered embers spawning behind the ball, fading.
+        const tx = p.x + p.w/2 - p.vx * 0.6;
+        const ty = p.y + p.h/2 - p.vy * 0.4;
+        if (Math.random() < 0.85) spawnEffect(tx, ty, '#ff6a2a', 12, 9);
+        if (Math.random() < 0.55) spawnEffect(tx - p.vx * 0.5, ty + (Math.random()-0.5)*4, '#ffaa33', 9, 7);
+        if (Math.random() < 0.35) spawnEffect(tx - p.vx * 1.1, ty + (Math.random()-0.5)*6, '#222222', 14, 8);
+      }
       if (p.type === 'grenade') p.spin = (p.spin || 0) + 0.3;
+      // Update 1.1 polish: grenade leaves a thin smoke trail while in flight.
+      if (p.type === 'grenade' && (Math.abs(p.vx) + Math.abs(p.vy)) > 1) {
+        if (Math.random() < 0.5) spawnEffect(p.x + p.w/2 - p.vx * 0.4, p.y + p.h/2 - p.vy * 0.4, '#3a4a2a', 14, 5);
+        if (Math.random() < 0.25) spawnEffect(p.x + p.w/2 - p.vx * 0.6, p.y + p.h/2 - p.vy * 0.6, '#888888', 12, 4);
+      }
+      // Jonah beet — small magenta + teal petal trail behind each pellet.
+      if (p.type === 'beet') {
+        if (Math.random() < 0.45) spawnEffect(p.x + p.w/2 - p.vx * 0.4, p.y + p.h/2 - p.vy * 0.4, '#e070b0', 10, 4);
+        if (Math.random() < 0.2) spawnEffect(p.x + p.w/2 - p.vx * 0.7, p.y + p.h/2 - p.vy * 0.5, '#a0e0d0', 9, 3);
+      }
 
       // Grenade fuse — explode in place after timer runs out
       if (p.type === 'grenade' && !stationary) {
@@ -7085,16 +7386,46 @@
         ctx.fillStyle = '#ffffff';
         ctx.beginPath(); ctx.arc(p.x + p.w/2 - 2, p.y + p.h/2 - 2, 3, 0, Math.PI*2); ctx.fill();
       } else if (p.type === 'shuriken') {
+        // Motion-blur ghost trail — 3 fading copies offset opposite vx/vy.
+        const cx = p.x + p.w/2, cy = p.y + p.h/2;
+        for (let g = 3; g >= 1; g--) {
+          ctx.save();
+          ctx.translate(cx - p.vx * g * 0.18, cy - p.vy * g * 0.18);
+          ctx.rotate(p.spin - g * 0.35);
+          ctx.globalAlpha = 0.18 + (3 - g) * 0.05;
+          ctx.fillStyle = '#cfd8e8';
+          ctx.fillRect(-8, -2, 16, 4);
+          ctx.fillRect(-2, -8, 4, 16);
+          ctx.restore();
+        }
+        ctx.globalAlpha = 1;
         ctx.save();
-        ctx.translate(p.x + p.w/2, p.y + p.h/2);
+        ctx.translate(cx, cy);
         ctx.rotate(p.spin);
         ctx.fillStyle = '#cfd8e8';
         ctx.fillRect(-8, -2, 16, 4);
         ctx.fillRect(-2, -8, 4, 16);
         ctx.fillStyle = '#4ab8ff';
         ctx.beginPath(); ctx.arc(0, 0, 3, 0, Math.PI*2); ctx.fill();
+        // Tiny rotating sparkle dot at outer tip
+        const sx = Math.cos(p.spin) * 8, sy = Math.sin(p.spin) * 8;
+        ctx.fillStyle = '#ffffff';
+        ctx.beginPath(); ctx.arc(sx, sy, 1.4, 0, Math.PI*2); ctx.fill();
         ctx.restore();
       } else if (p.type === 'bolt') {
+        // Motion-blur trail behind the bolt — fading purple streaks.
+        const dir = p.vx > 0 ? 1 : -1;
+        ctx.globalAlpha = 0.3;
+        ctx.strokeStyle = '#b088ff';
+        ctx.lineWidth = 2;
+        for (let g = 1; g <= 3; g++) {
+          ctx.globalAlpha = 0.32 - g * 0.08;
+          ctx.beginPath();
+          ctx.moveTo(p.x - dir * g * 6, p.y + p.h/2);
+          ctx.lineTo(p.x - dir * (g * 6 + 5), p.y + p.h/2);
+          ctx.stroke();
+        }
+        ctx.globalAlpha = 1;
         ctx.fillStyle = '#8a6a3a';
         ctx.fillRect(p.x, p.y, p.w, p.h);
         ctx.fillStyle = '#b088ff';
@@ -7806,6 +8137,23 @@
           // Small mushroom-cluster on the ground
           const armed = p.armed;
           const pulse = armed ? Math.sin(p.life * 0.1) * 2 : 0;
+          // ARMED: tall pulsing light beam rising from the trap as a clear warning.
+          if (armed) {
+            const beamH = 60 + Math.sin(p.life * 0.12) * 8;
+            const beamPulse = 0.18 + Math.sin(p.life * 0.18) * 0.08;
+            const beamGrad = ctx.createLinearGradient(0, p.y, 0, p.y - beamH);
+            beamGrad.addColorStop(0, `rgba(182, 255, 106, ${beamPulse + 0.15})`);
+            beamGrad.addColorStop(1, 'rgba(182, 255, 106, 0)');
+            ctx.fillStyle = beamGrad;
+            ctx.fillRect(p.x + p.w/2 - 8, p.y - beamH, 16, beamH);
+            // Bright core line up the center of the beam
+            ctx.fillStyle = `rgba(255, 255, 255, ${beamPulse})`;
+            ctx.fillRect(p.x + p.w/2 - 1, p.y - beamH, 2, beamH);
+            // Crawling spore particles — occasional drift upward in the beam
+            if (Math.random() < 0.35) {
+              spawnEffect(p.x + p.w/2 + (Math.random()-0.5)*10, p.y - Math.random() * beamH, '#b6ff6a', 18, 4);
+            }
+          }
           ctx.fillStyle = armed ? '#5aaf3a' : '#3a5a2a';
           ctx.fillRect(p.x, p.y, p.w, p.h);
           ctx.fillStyle = armed ? '#b6ff6a' : '#6a8a4a';
