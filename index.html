@@ -4137,9 +4137,9 @@
         ctx.lineTo(k.jx, k.jy);
         ctx.lineTo(k.ex, k.ey);
         ctx.stroke();
-        // Foot — small forward-pointing block.
+        // Foot — small centred block (no forward splay).
         ctx.fillStyle = footColor;
-        ctx.fillRect(k.ex - (fwd === 1 ? 1 : 6), k.ey - 2, 7, 4);
+        ctx.fillRect(k.ex - 3, k.ey - 2, 6, 4);
       };
       // Back leg first (behind), then front leg.
       drawOne(-1, Math.PI);
@@ -4158,7 +4158,7 @@
       const shDX = bodyW * 0.42;             // shoulders at the torso edges
       const upper = bodyH * 0.17, fore = bodyH * 0.18;   // sum ≈ 21px
       const sideX = bodyW * 0.42;            // rest hand straight below the shoulder
-      const restY = shY + (upper + fore) * 0.95;   // near full extension → arm hangs straight
+      const restY = shY + (upper + fore);    // full extension → arm hangs perfectly straight
       const p = this.gaitPhase;
       const speed = Math.abs(this.vx);
       const moving = this.onGround && speed > 0.4 && !this.moveState;
