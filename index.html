@@ -2235,6 +2235,14 @@
       if (this.squashTimer > 0) this.squashTimer--;
       if (this.onGround) { this.groundTime++; this.airTime = 0; }
       else { this.airTime++; this.groundTime = 0; }
+      // Skeletal walk-cycle clock — advanced here in the fixed 60Hz sim (NOT in
+      // render) so limb speed is identical on 60/120/144Hz displays. Display-only
+      // value; never mixed into the state hash.
+      {
+        const spd = Math.abs(this.vx);
+        if (this.onGround && spd > 0.4 && !this.moveState) this.gaitPhase += 0.16 + spd * 0.05;
+        else this.gaitPhase += 0.05;
+      }
       // Capture afterimage silhouette for fast movers — every character gets one,
       // tinted to their identity. Heavy / slow fighters rarely cross the threshold.
       const dashRx = /burnDash|katanaUp|ultraSpike|megaJump|uppercut|teleport/;
@@ -4078,78 +4086,82 @@
       }
     }
 
-    // ---- Skeletal legs (2-bone IK). Always drawn. Foot targets come from the
+    // ---- Skeletal legs (2-bone IK). Drawn over the lower torso (narrow stance
+    //      with a centre gap) so they read as legs. Foot targets come from the
     //      gait state: idle stance, walk/run step cycle, air tuck/trail,
     //      landing crouch (via squash), and hitstun splay. ----
     drawLegs(ctx, bodyX, bodyY, bodyW, bodyH) {
-      if (this.ledgeGrab) return;            // legs dangle is handled by ledge pose; skip cycle
-      const legColor = shade(this.def.color, 0.62);
-      const footColor = '#2a2a2a';
+      if (this.ledgeGrab) return;            // legs dangle handled by ledge pose
+      const legColor = shade(this.def.color, 0.50);
+      const footColor = shade(this.def.color, 0.34);
       const fwd = this.facing;
-      const hipY = bodyY + bodyH * 0.60;
-      const hipDX = bodyW * 0.20;
+      const hipY = bodyY + bodyH * 0.58;
+      const hipDX = bodyW * 0.16;            // narrow — leaves a visible centre gap
       const groundY = this.y + this.h;       // true foot line (collision bottom)
-      const thigh = bodyH * 0.26, shin = bodyH * 0.30;
-
-      // Advance the walk-cycle accumulator from horizontal speed (render-only).
+      const thigh = bodyH * 0.22, shin = bodyH * 0.24;
+      const p = this.gaitPhase;
       const speed = Math.abs(this.vx);
       const moving = this.onGround && speed > 0.4 && !this.moveState;
-      if (moving) this.gaitPhase += 0.18 + speed * 0.05;
-      else this.gaitPhase += 0.05;           // slow idle breathing cycle
-      const p = this.gaitPhase;
 
-      // Per-leg target. legSide: -1 = back leg, +1 = front leg (relative to facing).
+      // legSide: -1 = back leg, +1 = front leg (relative to facing).
       const drawOne = (legSide, phase) => {
         const hipX = this.cx + legSide * fwd * hipDX;
         let footX, footY;
         if (this.hitstun > 0) {
-          // Splayed flail
-          footX = hipX + Math.sin(this.animTick * 0.5 + phase) * 10 + fwd * 2;
-          footY = groundY - 4 - Math.abs(Math.cos(this.animTick * 0.4 + phase)) * 6;
+          footX = hipX + Math.sin(this.animTick * 0.45 + phase) * 7 + fwd * 2;
+          footY = groundY - 3 - Math.abs(Math.cos(this.animTick * 0.4 + phase)) * 5;
         } else if (!this.onGround) {
-          if (this.vy < -2) {
-            // Rising — tuck knees up and forward
-            footX = hipX + fwd * 5;
-            footY = groundY - 12 - Math.min(10, -this.vy * 0.4);
-          } else {
-            // Falling — legs trail slightly back and dangle
-            footX = hipX - fwd * 4 + legSide * 2;
-            footY = groundY - 6;
+          if (this.vy < -2) {                // rising — tuck up & forward
+            footX = hipX + fwd * 4;
+            footY = groundY - 10 - Math.min(8, -this.vy * 0.3);
+          } else {                           // falling — legs dangle, slight trail
+            footX = hipX - fwd * 3;
+            footY = groundY - 4;
           }
-        } else if (moving) {
-          // Walk/run step cycle. amplitude scales with speed.
-          const amp = Math.min(14, 4 + speed * 1.7);
-          const lift = Math.min(9, 3 + speed * 1.1);
+        } else if (moving) {                 // walk / run step cycle
+          const amp = Math.min(11, 4 + speed * 1.4);
+          const lift = Math.min(8, 3 + speed * 1.0);
           footX = hipX + Math.cos(p + phase) * amp * fwd;
           footY = groundY - Math.max(0, Math.sin(p + phase)) * lift;
-        } else {
-          // Idle stance — planted, gentle weight shift.
-          footX = hipX + fwd * legSide * 1.5 + Math.sin(this.animTick * 0.05) * 1.2;
+        } else {                             // idle — planted, gentle weight shift
+          footX = hipX + Math.sin(this.animTick * 0.05) * 0.8;
           footY = groundY;
         }
         // Knees bend forward (in facing direction).
-        drawLimb(hipX, hipY, footX, footY, thigh, shin, fwd, 5.5, legColor, footColor, 3);
+        const k = solveIK(hipX, hipY, footX, footY, thigh, shin, fwd);
+        ctx.lineCap = 'round';
+        ctx.strokeStyle = legColor;
+        ctx.lineWidth = 6;
+        ctx.beginPath();
+        ctx.moveTo(hipX, hipY);
+        ctx.lineTo(k.jx, k.jy);
+        ctx.lineTo(k.ex, k.ey);
+        ctx.stroke();
+        // Foot — small forward-pointing block.
+        ctx.fillStyle = footColor;
+        ctx.fillRect(k.ex - (fwd === 1 ? 1 : 6), k.ey - 2, 7, 4);
       };
       // Back leg first (behind), then front leg.
       drawOne(-1, Math.PI);
       drawOne(1, 0);
     }
 
-    // ---- Skeletal arms (2-bone IK). The back arm always balances/pumps; the
-    //      front arm tracks the current action during attacks/specials, else
-    //      follows the gait. ----
+    // ---- Skeletal arms (2-bone IK). Hands hang at the body's SIDES at rest so
+    //      they never cross the torso. The back arm balances/pumps; the front
+    //      arm retargets to the current action during attacks/specials. ----
     drawArms(ctx, bodyX, bodyY, bodyW, bodyH) {
       if (this.ledgeGrab) return;            // one arm already reaches the ledge
-      const armColor = shade(this.def.color, 0.78);
+      const armColor = shade(this.def.color, 0.72);
       const handColor = '#ffddba';
       const fwd = this.facing;
-      const shY = bodyY + bodyH * 0.34;
-      const shDX = bodyW * 0.30;
-      const upper = bodyH * 0.24, fore = bodyH * 0.26;
+      const shY = bodyY + bodyH * 0.30;      // shoulder height
+      const shDX = bodyW * 0.38;             // shoulders near the torso corners
+      const upper = bodyH * 0.17, fore = bodyH * 0.18;   // sum ≈ 21px
+      const sideX = bodyW * 0.52;            // rest hand just outside the body edge
+      const restY = bodyY + bodyH * 0.60;    // rest hand at hip height
       const p = this.gaitPhase;
       const speed = Math.abs(this.vx);
       const moving = this.onGround && speed > 0.4 && !this.moveState;
-      const hipY = bodyY + bodyH * 0.62;
 
       // ---- Front-hand target ----
       let ftx, ftY, fbend = fwd;
@@ -4157,58 +4169,50 @@
       const reach = mt ? ARM_REACH[mt] : null;
       if (mt && reach !== 'neutral') {
         const hb = this.getHitbox && this.getHitbox();
-        if (reach === 'up') {
-          // Lobs / uppercuts / recoveries — present the hand overhead-forward.
+        if (reach === 'up') {                // lobs / uppercuts / recoveries
           ftx = this.cx + fwd * 12;
-          ftY = this.y - 6;
+          ftY = this.y - 4;
           fbend = -fwd;
-        } else if (hb && hb.type !== 'grab') {
-          // Melee — reach the hand to the leading edge of the active hitbox.
+        } else if (hb && hb.type !== 'grab') {   // melee — reach to the hitbox edge
           ftx = fwd === 1 ? hb.x + hb.w - 4 : hb.x + 4;
           ftY = hb.y + hb.h * 0.5;
-        } else {
-          // Cast / throw / grab — present the hand forward at chest height.
-          ftx = this.cx + fwd * 22;
-          ftY = shY + 4;
+        } else {                             // cast / throw / grab — present forward
+          ftx = this.cx + fwd * 20;
+          ftY = shY + 6;
         }
-      } else if (mt === null && !this.onGround) {
-        // Airborne, no move — arms raise for balance.
-        ftx = this.cx + fwd * 13;
-        ftY = shY - 2;
-      } else if (moving) {
-        // Run — front arm pumps opposite the front leg.
-        const amp = Math.min(12, 4 + speed * 1.3);
-        ftx = this.cx + fwd * (6) + Math.cos(p + Math.PI) * amp * fwd;
-        ftY = hipY - Math.max(0, Math.sin(p + Math.PI)) * 4;
-      } else {
-        // Idle — hand rests at side with gentle sway.
-        ftx = this.cx + fwd * (shDX + 2);
-        ftY = hipY + Math.sin(this.animTick * 0.06) * 1.5;
+      } else if (mt === null && !this.onGround) {  // airborne — slight raise
+        ftx = this.cx + fwd * (sideX + 2);
+        ftY = restY - 6;
+      } else if (moving) {                   // run — pump opposite the front leg
+        const amp = Math.min(9, 3 + speed * 1.1);
+        ftx = this.cx + fwd * sideX + Math.cos(p + Math.PI) * amp * fwd;
+        ftY = restY - Math.max(0, Math.sin(p + Math.PI)) * 3;
+      } else {                               // idle — hang at the side
+        ftx = this.cx + fwd * sideX;
+        ftY = restY + Math.sin(this.animTick * 0.06) * 1.2;
       }
 
-      // ---- Back-hand target (always a balancing counter-pose) ----
+      // ---- Back-hand target (balancing counter-pose) ----
       let btx, btY, bbend = -fwd;
       if (this.hitstun > 0) {
-        btx = this.cx - fwd * 10;
-        btY = shY + Math.sin(this.animTick * 0.4) * 6;
+        btx = this.cx - fwd * (sideX + 3);
+        btY = shY + Math.sin(this.animTick * 0.4) * 5;
       } else if (!this.onGround) {
-        btx = this.cx - fwd * 11;
-        btY = shY + 2;
+        btx = this.cx - fwd * (sideX + 1);
+        btY = restY - 4;
       } else if (moving) {
-        const amp = Math.min(12, 4 + speed * 1.3);
-        btx = this.cx - fwd * 6 + Math.cos(p) * amp * fwd;
-        btY = hipY - Math.max(0, Math.sin(p)) * 4;
+        const amp = Math.min(9, 3 + speed * 1.1);
+        btx = this.cx - fwd * sideX + Math.cos(p) * amp * fwd;
+        btY = restY - Math.max(0, Math.sin(p)) * 3;
       } else {
-        btx = this.cx - fwd * (shDX - 1);
-        btY = hipY + Math.sin(this.animTick * 0.06 + 1) * 1.5;
+        btx = this.cx - fwd * sideX;
+        btY = restY + Math.sin(this.animTick * 0.06 + 1) * 1.2;
       }
 
-      // Back arm (behind torso visually — drawn first, slightly darker/thinner).
-      const backSh = this.cx - fwd * shDX;
-      drawLimb(backSh, shY, btx, btY, upper, fore, bbend, 4.5, shade(this.def.color, 0.66), handColor, 2.5);
+      // Back arm — drawn first, behind the torso (darker, thinner).
+      drawLimb(this.cx - fwd * shDX, shY, btx, btY, upper, fore, bbend, 4.5, shade(this.def.color, 0.60), handColor, 2.5);
       // Front arm.
-      const frontSh = this.cx + fwd * shDX;
-      drawLimb(frontSh, shY, ftx, ftY, upper, fore, fbend, 5, armColor, handColor, 3);
+      drawLimb(this.cx + fwd * shDX, shY, ftx, ftY, upper, fore, fbend, 5, armColor, handColor, 3);
     }
 
     render(ctx) {
@@ -4411,9 +4415,6 @@
       ctx.rotate(leanRad);
       ctx.translate(-this.cx, -(this.y + this.h));
 
-      // Legs drawn BEHIND the torso (skeletal IK) so the body overlaps the hips.
-      this.drawLegs(ctx, bodyX, bodyY, bodyW, bodyH);
-
       // Body
       ctx.fillStyle = c.color;
       ctx.fillRect(bodyX, bodyY, bodyW, bodyH);
@@ -4422,6 +4423,10 @@
       const stripeY = bodyY + bodyH * 0.30;
       const stripeH = bodyH * 0.13;
       ctx.fillRect(bodyX, stripeY, bodyW, stripeH);
+
+      // Legs drawn OVER the lower torso (skeletal IK) so they're visible as legs
+      // with a centre gap, feet planted on the collision foot line.
+      this.drawLegs(ctx, bodyX, bodyY, bodyW, bodyH);
 
       // Head — also gets the bob, plus a slight bob-in-place when idle
       const headW = 20, headH = 16;
