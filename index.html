@@ -196,13 +196,23 @@
   };
   function updateCamera() {
     if (fighters.length < 2) return;
-    // Midpoint of the two fighters
-    const cx = (fighters[0].cx + fighters[1].cx) / 2;
-    const cy = (fighters[0].cy + fighters[1].cy) / 2;
-    // Zoom based on distance between fighters — pull back if they're far apart
-    const dx = Math.abs(fighters[0].cx - fighters[1].cx);
-    const dy = Math.abs(fighters[0].cy - fighters[1].cy);
-    // Keep both fighters on screen with some margin
+    // Bounding box of every alive fighter (generalized from the old 2-player
+    // midpoint so 3- and 4-player matches frame everyone).
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, n = 0;
+    for (const f of fighters) {
+      if (f.stocks <= 0 || f.respawnTimer > 0) continue;
+      if (f.cx < minX) minX = f.cx;
+      if (f.cx > maxX) maxX = f.cx;
+      if (f.cy < minY) minY = f.cy;
+      if (f.cy > maxY) maxY = f.cy;
+      n++;
+    }
+    if (n === 0) return;                       // no one to frame (between respawns) — hold
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const dx = maxX - minX;
+    const dy = maxY - minY;
+    // Keep all fighters on screen with some margin
     const marginX = 280, marginY = 200;
     const zx = W / (dx + marginX * 2);
     const zy = H / (dy + marginY * 2);
@@ -417,10 +427,17 @@
   const CHAR_KEYS = ['nico', 'derek', 'rhys', 'greyson', 'kele', 'jonah', 'theo', 'cole', 'angus', 'aidan', 'liam', 'colton', 'donny', 'drew', 'whitney'];
 
   // ---------- CONTROL MAPS ----------
+  // Slots 0 + 1 use the real keyboard schemes (local 2P uses both, online uses
+  // only slot 0). Slots 2 + 3 use phantom keycodes that no real keyboard event
+  // produces, so they only ever fire when the network layer routes a remote
+  // player's input mask to that slot via applyInputBitsToFrame.
   const controls = [
     { left:'KeyA', right:'KeyD', up:'KeyW', down:'KeyS', block:'ShiftLeft', special:'KeyG', attack:'KeyF' },
     { left:'ArrowLeft', right:'ArrowRight', up:'ArrowUp', down:'ArrowDown', block:'ShiftRight', special:'Slash', attack:'Period' },
+    { left:'Slot2_left', right:'Slot2_right', up:'Slot2_up', down:'Slot2_down', block:'Slot2_block', special:'Slot2_special', attack:'Slot2_attack' },
+    { left:'Slot3_left', right:'Slot3_right', up:'Slot3_up', down:'Slot3_down', block:'Slot3_block', special:'Slot3_special', attack:'Slot3_attack' },
   ];
+  const MAX_PLAYERS = 4;
 
   // ---------- PROJECTILES & EFFECTS ----------
   const projectiles = [];
@@ -6612,46 +6629,77 @@
     }
   }
 
-  // ---------- NETWORK STATE ----------
-  // 'local' = shared keyboard, no networking.
-  // 'host'  = this client owns P1 (index 0); P2's inputs come from remote peer.
-  // 'guest' = this client owns P2 (index 1); P1's inputs come from remote peer.
+  // ---------- NETWORK STATE (N-player lobby, up to 4) ----------
+  //   mode = 'local' → shared keyboard, no networking.
+  //   mode = 'host'  → this client occupies slot 0; accepts up to 3 guest
+  //                    connections and RELAYS each guest's input to all other
+  //                    guests (hub-and-spoke). Owns slot assignment + seed.
+  //   mode = 'guest' → this client occupies slot 1..3; connects only to host.
+  //                    Receives a 'welcome' with our assigned slot, then sees
+  //                    full lobby state via periodic 'lobby' broadcasts.
+  //
+  // Slots: array of 4 entries (one per fighter index). Each slot is either
+  //   null (empty) or { char, ready, occupied }. Host always sets slot 0
+  //   on its own machine. Guests fill in their assigned slot when 'welcome'
+  //   arrives, then observe the other slots from 'lobby' broadcasts.
   const net = {
-    mode: 'local',          // 'local' | 'host' | 'guest'
-    localIndex: 0,          // which player index this client controls
-    peer: null,             // PeerJS Peer instance
-    conn: null,             // PeerJS DataConnection
-    roomCode: '',           // 6-char share code (host's peer id suffix)
-    connected: false,
-    everConnected: false,   // true once conn.on('open') has fired at least once
+    mode: 'local',
+    localSlot: 0,            // 0 (host) or 1..3 (guest)
+    slots: null,             // [{char, ready, occupied}, ...] of length 4
+    peer: null,              // PeerJS Peer
+    conns: {},               // host: slot index → DataConnection (1..3)
+    hostConn: null,          // guest: single connection back to host
+    roomCode: '',
+    connected: false,        // guest only — connected to host
+    everConnected: false,
     error: '',
     statusText: '',
-    inputDelay: 3,          // frames of input delay (lockstep buffer)
-    currentFrame: 0,        // logical frame counter for the active match
-    localBuf: new Map(),    // frame → input mask for local player
-    remoteBuf: new Map(),   // frame → input mask for remote player
+    inputDelay: 3,
+    currentFrame: 0,
+    localBuf: new Map(),     // frame → our local input mask
+    remoteBufs: [null, new Map(), new Map(), new Map()],  // per slot (0 is local for host)
     lastSentFrame: -1,
-    lastRecvFrame: -1,
     waitingForRemote: false,
-    hashHistory: new Map(),  // frame → 32-bit state hash for desync detection
+    hashHistory: new Map(),
     desyncFrame: -1,
+    seed: 0,
+    stage: 'classic',
   };
+
+  function emptySlots() {
+    return [null, null, null, null];
+  }
+
   function netReset() {
     net.currentFrame = 0;
     net.localBuf.clear();
-    net.remoteBuf.clear();
+    net.remoteBufs = [new Map(), new Map(), new Map(), new Map()];
     net.lastSentFrame = -1;
-    net.lastRecvFrame = -1;
     net.waitingForRemote = false;
     net.hashHistory.clear();
     net.desyncFrame = -1;
   }
 
-  // Handshake state (shared between host/guest).
-  // Both sides exchange character + seed, then transition into PLAY together.
-  let netPending = null; // { hostChar, guestChar, seed } once both filled
-  function netReadyToStart() {
-    return netPending && netPending.hostChar && netPending.guestChar && (netPending.seed != null);
+  // True once the lobby has at least 2 players and everyone occupied is ready.
+  function lobbyReadyToStart() {
+    if (!net.slots) return false;
+    let occupied = 0, ready = 0;
+    for (const s of net.slots) {
+      if (s && s.occupied) {
+        occupied++;
+        if (s.ready) ready++;
+      }
+    }
+    return occupied >= 2 && ready === occupied;
+  }
+
+  // Host: broadcast the full lobby state to every connected guest.
+  function broadcastLobby() {
+    if (net.mode !== 'host') return;
+    const payload = { t: 'lobby', slots: net.slots, stage: currentStage };
+    for (const slot in net.conns) {
+      try { net.conns[slot].send(payload); } catch (e) {}
+    }
   }
 
   function generateRoomCode() {
@@ -6662,15 +6710,22 @@
   }
 
   function netCleanup() {
-    try { net.conn && net.conn.close(); } catch (e) {}
+    try { net.hostConn && net.hostConn.close(); } catch (e) {}
+    for (const k in net.conns) {
+      try { net.conns[k].close(); } catch (e) {}
+    }
     try { net.peer && net.peer.destroy(); } catch (e) {}
-    net.conn = null;
+    net.hostConn = null;
+    net.conns = {};
     net.peer = null;
     net.connected = false;
     net.everConnected = false;
-    netPending = null;
+    net.slots = null;
   }
 
+  // --- HOST: open a room. Allocates slot 0 to ourselves, accepts up to 3 guests,
+  //     assigns them slots 1..3 in connection order. Re-broadcasts the full
+  //     lobby state to all guests whenever anything changes. ---
   function startHost(localChar) {
     if (typeof Peer === 'undefined') {
       net.error = 'PeerJS not loaded — host the file on a real URL (Netlify/Pages).';
@@ -6678,37 +6733,58 @@
     }
     netCleanup();
     net.mode = 'host';
-    net.localIndex = 0;
+    net.localSlot = 0;
+    net.seed = (Math.random() * 0x7fffffff) | 0;
+    net.slots = emptySlots();
+    net.slots[0] = { char: localChar, ready: false, occupied: true };
     net.statusText = 'creating room...';
     net.error = '';
-    const code = 'ab-' + generateRoomCode().toLowerCase(); // 'ab-' prefix to namespace
+    const code = 'ab-' + generateRoomCode().toLowerCase();
     net.roomCode = code.slice(3).toUpperCase();
-    netPending = { hostChar: localChar, guestChar: null, seed: (Math.random() * 0x7fffffff) | 0 };
     net.peer = new Peer(code);
-    net.peer.on('open', () => { net.statusText = 'waiting for guest...'; });
+    net.peer.on('open', () => { net.statusText = 'waiting for players...'; });
     net.peer.on('error', e => {
       net.error = (e && e.type) || 'peer error';
       net.statusText = 'error: ' + net.error;
     });
     net.peer.on('connection', conn => {
-      net.conn = conn;
+      // Assign first empty slot 1..3.
+      let assigned = -1;
+      for (let i = 1; i < MAX_PLAYERS; i++) {
+        if (!net.slots[i] || !net.slots[i].occupied) { assigned = i; break; }
+      }
+      if (assigned === -1) {
+        // Room full — politely send a refusal and close.
+        conn.on('open', () => {
+          try { conn.send({ t: 'full' }); } catch (e) {}
+          try { conn.close(); } catch (e) {}
+        });
+        return;
+      }
+      const slotIdx = assigned;
       conn.on('open', () => {
-        net.connected = true;
+        net.conns[slotIdx] = conn;
+        net.slots[slotIdx] = { char: CHAR_KEYS[0], ready: false, occupied: true };
         net.everConnected = true;
-        net.statusText = 'guest connected, waiting for char select...';
-        // Send our char + seed
+        net.statusText = `${Object.keys(net.conns).length+1}/4 connected`;
         try {
-          conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed, stage: currentStage });
+          conn.send({ t: 'welcome', slot: slotIdx, seed: net.seed, stage: currentStage });
         } catch (e) {}
+        broadcastLobby();
       });
-      conn.on('data', handleNetMsg);
+      conn.on('data', msg => handleNetMsg(msg, slotIdx));
       conn.on('close', () => {
-        net.connected = false;
-        net.statusText = 'guest disconnected';
+        delete net.conns[slotIdx];
+        if (net.slots) net.slots[slotIdx] = null;
+        net.statusText = `slot ${slotIdx+1} disconnected`;
+        broadcastLobby();
       });
     });
   }
 
+  // --- GUEST: connect to host. Wait for 'welcome' to learn our slot index, then
+  //     observe the lobby via 'lobby' broadcasts. Send our character / ready
+  //     state up to the host whenever they change. ---
   function startGuest(roomCode, localChar) {
     if (typeof Peer === 'undefined') {
       net.error = 'PeerJS not loaded — host the file on a real URL.';
@@ -6716,25 +6792,24 @@
     }
     netCleanup();
     net.mode = 'guest';
-    net.localIndex = 1;
+    net.localSlot = -1;                       // not assigned until 'welcome'
     net.statusText = 'connecting to ' + roomCode + '...';
     net.error = '';
     net.roomCode = roomCode;
-    netPending = { hostChar: null, guestChar: localChar, seed: null };
+    net.slots = emptySlots();
     net.peer = new Peer();
     net.peer.on('open', () => {
       const targetId = 'ab-' + roomCode.toLowerCase();
-      net.conn = net.peer.connect(targetId, { reliable: true });
-      net.conn.on('open', () => {
+      const conn = net.peer.connect(targetId, { reliable: true });
+      net.hostConn = conn;
+      conn.on('open', () => {
         net.connected = true;
         net.everConnected = true;
-        net.statusText = 'connected, sending char...';
-        try {
-          net.conn.send({ t: 'guestChar', char: netPending.guestChar });
-        } catch (e) {}
+        net.statusText = 'connected, joining lobby...';
+        try { conn.send({ t: 'pick', char: localChar }); } catch (e) {}
       });
-      net.conn.on('data', handleNetMsg);
-      net.conn.on('close', () => {
+      conn.on('data', msg => handleNetMsg(msg, 0));   // 0 = "from host"
+      conn.on('close', () => {
         net.connected = false;
         net.statusText = 'host disconnected';
       });
@@ -6745,39 +6820,63 @@
     });
   }
 
-  function handleNetMsg(msg) {
+  // fromSlot = the slot index of the peer who sent the message:
+  //   host sees messages from each guest tagged with that guest's slot;
+  //   guest sees all incoming messages tagged 0 (always from host).
+  function handleNetMsg(msg, fromSlot) {
     if (!msg || typeof msg !== 'object') return;
-    if (msg.t === 'init') {
-      // Guest receives this from host
-      netPending = netPending || { hostChar: null, guestChar: null, seed: null };
-      netPending.hostChar = msg.hostChar;
-      netPending.seed = msg.seed;
+    if (msg.t === 'welcome') {
+      // Guest receives this on initial connect.
+      net.localSlot = msg.slot;
+      net.seed = msg.seed;
       if (msg.stage && STAGES[msg.stage]) currentStage = msg.stage;
-      net.statusText = 'host: ' + msg.hostChar + ' — waiting to start';
-    } else if (msg.t === 'guestChar') {
-      // Host receives this from guest
-      netPending = netPending || { hostChar: null, guestChar: null, seed: null };
-      netPending.guestChar = msg.char;
-      net.statusText = 'guest: ' + msg.char + ' — press ENTER to start';
-    } else if (msg.t === 'startMatch') {
-      // Coordinated start signal from host. Picks up the freshly generated
-      // seed for this match (rematches use a new seed each time).
+      // Pre-fill our own slot so we render in the lobby immediately.
+      net.slots[net.localSlot] = { char: CHAR_KEYS[menuSel[0]], ready: false, occupied: true };
+      net.statusText = `joined as slot ${net.localSlot + 1}`;
+    } else if (msg.t === 'lobby') {
+      // Guest receives full lobby state from host.
+      if (msg.slots) net.slots = msg.slots;
+      if (msg.stage && STAGES[msg.stage]) currentStage = msg.stage;
+    } else if (msg.t === 'full') {
+      net.error = 'room full';
+      net.statusText = 'room full (max 4 players)';
+    } else if (msg.t === 'pick') {
+      // Host receives a character pick from a guest.
+      if (net.slots[fromSlot]) net.slots[fromSlot].char = msg.char;
+      broadcastLobby();
+    } else if (msg.t === 'ready') {
+      // Host receives a ready-toggle from a guest.
+      if (net.slots[fromSlot]) net.slots[fromSlot].ready = !!msg.ready;
+      broadcastLobby();
+    } else if (msg.t === 'start') {
+      // Coordinated start signal — host broadcasts to all guests with the slot
+      // assignments (characters) so everyone spawns the identical fighter set.
       if (net.mode === 'guest') {
-        if (msg.seed != null && netPending) netPending.seed = msg.seed;
-        if (netReadyToStart()) beginNetMatch();
+        if (msg.slots) net.slots = msg.slots;
+        if (msg.seed != null) net.seed = msg.seed;
+        beginNetMatch();
       }
     } else if (msg.t === 'input') {
-      net.remoteBuf.set(msg.frame, msg.mask);
-      if (msg.frame > net.lastRecvFrame) net.lastRecvFrame = msg.frame;
+      // Wire format: { t:'input', slot:S, frame:F, mask:M }
+      if (msg.slot != null && msg.frame != null && msg.mask != null && net.remoteBufs[msg.slot]) {
+        net.remoteBufs[msg.slot].set(msg.frame, msg.mask);
+      }
+      // Host: relay this guest's input to all OTHER guests so peers see each
+      // other's actions. (No relay if the message originated from host itself.)
+      if (net.mode === 'host' && msg.slot !== 0) {
+        const relay = { t: 'input', slot: msg.slot, frame: msg.frame, mask: msg.mask };
+        for (const otherSlot in net.conns) {
+          if (+otherSlot !== msg.slot) {
+            try { net.conns[otherSlot].send(relay); } catch (e) {}
+          }
+        }
+      }
     } else if (msg.t === 'hash') {
-      // Desync check: peer sent their state hash for some frame; compare with ours.
       const ours = net.hashHistory.get(msg.frame);
       if (ours !== undefined && ours !== msg.hash) {
         net.desyncFrame = msg.frame;
         net.statusText = 'DESYNC at frame ' + msg.frame;
       }
-    } else if (msg.t === 'pause') {
-      // Reserved for future pause/resume
     }
   }
 
@@ -6851,12 +6950,11 @@
   }
 
   function beginNetMatch() {
-    if (!netReadyToStart()) return;
-    // Both clients land here independently and call startMatch with synced inputs.
-    menuSel[0] = CHAR_KEYS.indexOf(netPending.hostChar);
-    menuSel[1] = CHAR_KEYS.indexOf(netPending.guestChar);
-    matchSeed = netPending.seed;
+    if (!net.slots) return;
+    matchSeed = net.seed;
     netReset();
+    // startMatch() reads net.slots (host + guests have identical lobby state
+    // at this point) and spawns one fighter per occupied slot.
     startMatch();
   }
 
@@ -6867,9 +6965,10 @@
   const frameKeys = {};
   const INPUT_BTNS = ['left', 'right', 'up', 'down', 'block', 'special', 'attack'];
   function snapshotInputsLocal() {
-    // Local 2P: copy all keys that appear in either control map. Reads from the
-    // press latch too so quick taps (keydown+keyup between two sim frames) still
-    // fire the move. Latch is consumed here so it isn't double-counted next frame.
+    // Local 2P: copy all keys that appear in either real-keyboard control map.
+    // Slots 2/3 use phantom keycodes and stay at 0 in local mode (their fighters
+    // can't be controlled by a single keyboard — they're for online lobby only).
+    // Latch is consumed so quick taps register on the next sim frame.
     for (let i = 0; i < 2; i++) {
       const c = controls[i];
       for (const b of INPUT_BTNS) frameKeys[c[b]] = isHeld(c[b]);
@@ -6916,14 +7015,26 @@
     // For local play, freshen the seed each match so moves don't replay identically.
     if (net.mode === 'local') matchSeed = (Date.now() & 0x7fffffff) | 0;
     rngSeed(matchSeed);
-    const p1Key = CHAR_KEYS[menuSel[0]];
-    const p2Key = CHAR_KEYS[menuSel[1]];
-    fighters = [
-      new Fighter(p1Key, W * 0.3, 1, 0),
-      new Fighter(p2Key, W * 0.7, -1, 1),
-    ];
-    fighters[0].invuln = 60;
-    fighters[1].invuln = 60;
+    // ----- Determine which slots are playing this match -----
+    // Online (when net.slots is populated): use the slot/char data from the
+    //   lobby; one fighter per occupied slot.
+    // Otherwise (local 2P or any legacy code path): fall back to menuSel[0..1].
+    let slotChars;
+    if (net.mode !== 'local' && net.slots) {
+      slotChars = net.slots.filter(s => s && s.char).map(s => s.char);
+    } else {
+      slotChars = [CHAR_KEYS[menuSel[0]], CHAR_KEYS[menuSel[1]]];
+    }
+    const N = Math.max(2, Math.min(MAX_PLAYERS, slotChars.length));
+    // Evenly spaced spawn positions across the stage view. Facing alternates so
+    // the outermost fighters look inward.
+    fighters = [];
+    for (let i = 0; i < N; i++) {
+      const fracX = (i + 1) / (N + 1);                // 1/3, 2/3 for 2P; 1/4, 2/4, 3/4 for 3P; etc.
+      const facing = (i < N / 2) ? 1 : -1;
+      fighters.push(new Fighter(slotChars[i] || CHAR_KEYS[0], W * fracX, facing, i));
+    }
+    for (const f of fighters) f.invuln = 60;
     winner = null;
     state = STATE.PLAY;
   }
@@ -9189,16 +9300,28 @@
   }
 
   function drawHUD() {
-    for (let i = 0; i < fighters.length; i++) {
+    // Lay out N HUD panels along the bottom edge. Panel width shrinks with
+    // player count so all fit cleanly: 2P → 220px panels with the original
+    // outer placement; 3-4P → equal-width panels distributed across the screen.
+    const N = fighters.length;
+    const panelW = N <= 2 ? 220 : Math.min(220, Math.floor((W - 40 - (N - 1) * 12) / N));
+    for (let i = 0; i < N; i++) {
       const f = fighters[i];
-      const baseX = i === 0 ? 40 : W - 260;
+      let baseX;
+      if (N === 2) {
+        baseX = i === 0 ? 40 : W - 260;
+      } else {
+        const totalW = N * panelW + (N - 1) * 12;
+        baseX = Math.floor((W - totalW) / 2) + i * (panelW + 12);
+      }
       const y = H - 80;
+      const PW = panelW;
 
       ctx.fillStyle = '#22223a';
-      ctx.fillRect(baseX, y, 220, 60);
+      ctx.fillRect(baseX, y, PW, 60);
       ctx.strokeStyle = f.def.color;
       ctx.lineWidth = 2;
-      ctx.strokeRect(baseX, y, 220, 60);
+      ctx.strokeRect(baseX, y, PW, 60);
 
       // name
       ctx.fillStyle = f.def.color;
@@ -9212,61 +9335,65 @@
       ctx.font = 'bold 22px sans-serif';
       ctx.fillText(`${dmg}%`, baseX + 10, y + 46);
 
-      // stocks
+      // stocks — three pips anchored to the panel's right edge.
+      const stockBaseX = baseX + PW - 80;
       for (let s = 0; s < 3; s++) {
         ctx.fillStyle = s < f.stocks ? f.def.color : '#333';
         ctx.beginPath();
-        ctx.arc(baseX + 140 + s * 20, y + 40, 6, 0, Math.PI*2);
+        ctx.arc(stockBaseX + s * 20, y + 40, 6, 0, Math.PI*2);
         ctx.fill();
       }
+
+      // Per-status meters share a 60-wide column near the right side of the panel.
+      const meterX = baseX + Math.max(70, PW - 140);
 
       // Poison status indicator
       if (f.poisonTimer > 0) {
         const poisonFrac = f.poisonTimer / 90;
         ctx.fillStyle = '#2a3a22';
-        ctx.fillRect(baseX + 80, y + 8, 60, 6);
+        ctx.fillRect(meterX, y + 8, 60, 6);
         ctx.fillStyle = '#5aaf3a';
-        ctx.fillRect(baseX + 80, y + 8, 60 * poisonFrac, 6);
+        ctx.fillRect(meterX, y + 8, 60 * poisonFrac, 6);
         ctx.fillStyle = '#b6ff6a';
         ctx.font = 'bold 9px sans-serif';
-        ctx.fillText('POISONED', baseX + 80, y + 24);
+        ctx.fillText('POISONED', meterX, y + 24);
       }
 
       // Cole-only: fuel meter
       if (f.key === 'cole') {
         const fuelFrac = f.fuel / f.maxFuel;
         ctx.fillStyle = '#2a2018';
-        ctx.fillRect(baseX + 80, y + 30, 60, 6);
+        ctx.fillRect(meterX, y + 30, 60, 6);
         // Color shifts from orange (full) → red (low)
         const fuelColor = fuelFrac > 0.4 ? '#ff8a3a' : (fuelFrac > 0.15 ? '#ff6a2a' : '#a34040');
         ctx.fillStyle = fuelColor;
-        ctx.fillRect(baseX + 80, y + 30, 60 * fuelFrac, 6);
+        ctx.fillRect(meterX, y + 30, 60 * fuelFrac, 6);
         ctx.fillStyle = '#ffaa33';
         ctx.font = 'bold 9px sans-serif';
-        ctx.fillText('FUEL', baseX + 80, y + 28);
+        ctx.fillText('FUEL', meterX, y + 28);
       }
       // Angus-only: code meter (gained from damage taken, spent on platforms / dashes)
       if (f.key === 'angus') {
         const codeFrac = f.code / f.maxCode;
         ctx.fillStyle = '#0a2010';
-        ctx.fillRect(baseX + 80, y + 30, 60, 6);
+        ctx.fillRect(meterX, y + 30, 60, 6);
         ctx.fillStyle = codeFrac >= 1 ? '#aaffaa' : '#39ff14';
-        ctx.fillRect(baseX + 80, y + 30, 60 * codeFrac, 6);
+        ctx.fillRect(meterX, y + 30, 60 * codeFrac, 6);
         ctx.fillStyle = '#39ff14';
         ctx.font = 'bold 9px monospace';
-        ctx.fillText('CODE ' + Math.floor(f.code), baseX + 80, y + 28);
+        ctx.fillText('CODE ' + Math.floor(f.code), meterX, y + 28);
       }
 
       // Fueled (gasoline-doused) status — shown for any non-Cole fighter who's been doused
       if (f.fueled > 0 && f.key !== 'cole') {
         const ff = f.fueled / 240;
         ctx.fillStyle = '#2a1810';
-        ctx.fillRect(baseX + 80, y + 38, 60, 5);
+        ctx.fillRect(meterX, y + 38, 60, 5);
         ctx.fillStyle = '#8a6a3a';
-        ctx.fillRect(baseX + 80, y + 38, 60 * ff, 5);
+        ctx.fillRect(meterX, y + 38, 60 * ff, 5);
         ctx.fillStyle = '#d4a468';
         ctx.font = 'bold 8px sans-serif';
-        ctx.fillText('FUELED', baseX + 80, y + 50);
+        ctx.fillText('FUELED', meterX, y + 50);
       }
     }
   }
@@ -9277,7 +9404,7 @@
   let menuModeIdx = 0;          // 0=LOCAL, 1=HOST, 2=JOIN, 3=MOVESETS
   let menuStadiumIdx = 0;       // index into STAGE_KEYS
   let joinCodeInput = '';
-  const MODE_LABELS = ['LOCAL 2P', 'HOST ONLINE', 'JOIN ONLINE', 'MOVESET KEY'];
+  const MODE_LABELS = ['LOCAL 2P', 'HOST PARTY', 'JOIN PARTY', 'MOVESET KEY'];
   const ROOM_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
   function updateMenu() {
@@ -9347,69 +9474,68 @@
         }
       }
     } else if (menuStage === 'chars') {
-      // Local 2P: each player uses their own control scheme.
-      // Online: the local player always uses the P1 scheme (WASD/LShift/F/G)
-      // regardless of which fighter index they own. (fighterIdx, keyboardCtrl) pairs.
-      const pickers = (net.mode === 'local')
-        ? [{ fighterIdx: 0, ctrl: controls[0] }, { fighterIdx: 1, ctrl: controls[1] }]
-        : [{ fighterIdx: net.mode === 'host' ? 0 : 1, ctrl: controls[0] }];
-      for (const { fighterIdx: i, ctrl } of pickers) {
-        if (!menuConfirm[i]) {
-          if (tap(ctrl.left)) menuSel[i] = (menuSel[i] + CHAR_KEYS.length - 1) % CHAR_KEYS.length;
-          if (tap(ctrl.right)) menuSel[i] = (menuSel[i] + 1) % CHAR_KEYS.length;
-          if (tap(ctrl.special)) {
-            menuConfirm[i] = true;
-            // First confirm in net mode opens the connection. On rematch (peer
-            // already exists), instead push our latest char selection to the peer.
-            if (net.mode === 'host') {
-              if (!net.peer) {
-                startHost(CHAR_KEYS[menuSel[0]]);
-              } else if (net.conn && netPending) {
-                netPending.hostChar = CHAR_KEYS[menuSel[0]];
-                try { net.conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed, stage: currentStage }); } catch (e) {}
-              }
-            } else if (net.mode === 'guest') {
-              if (!net.peer) {
-                startGuest(net.roomCode, CHAR_KEYS[menuSel[1]]);
-              } else if (net.conn && netPending) {
-                netPending.guestChar = CHAR_KEYS[menuSel[1]];
-                try { net.conn.send({ t: 'guestChar', char: netPending.guestChar }); } catch (e) {}
-              }
+      // Local 2P: each player uses their own keyboard scheme (unchanged).
+      // Online: the local player always uses the P1 scheme. LEFT/RIGHT change
+      //   the picked character; SPECIAL toggles READY. Host: SPECIAL=ready,
+      //   ENTER starts the match when all occupied slots are ready (≥2).
+      if (net.mode === 'local') {
+        const pickers = [{ fighterIdx: 0, ctrl: controls[0] }, { fighterIdx: 1, ctrl: controls[1] }];
+        for (const { fighterIdx: i, ctrl } of pickers) {
+          if (!menuConfirm[i]) {
+            if (tap(ctrl.left)) menuSel[i] = (menuSel[i] + CHAR_KEYS.length - 1) % CHAR_KEYS.length;
+            if (tap(ctrl.right)) menuSel[i] = (menuSel[i] + 1) % CHAR_KEYS.length;
+            if (tap(ctrl.special)) menuConfirm[i] = true;
+          } else if (tap(ctrl.block)) {
+            menuConfirm[i] = false;
+          }
+        }
+        if (tap('Enter') && menuConfirm[0] && menuConfirm[1]) startMatch();
+      } else {
+        // Online lobby — first entry opens the connection.
+        if (!net.peer) {
+          if (net.mode === 'host') startHost(CHAR_KEYS[menuSel[0]]);
+          else startGuest(net.roomCode, CHAR_KEYS[menuSel[0]]);
+        }
+        const ctrl = controls[0];
+        const mySlot = net.localSlot >= 0 ? net.localSlot : 0;
+        const me = net.slots && net.slots[mySlot];
+        if (me && !me.ready) {
+          // Pick character while unready
+          if (tap(ctrl.left) || tap(ctrl.right)) {
+            const dir = tap(ctrl.left) ? -1 : 1;
+            const idx = (CHAR_KEYS.indexOf(me.char) + CHAR_KEYS.length + dir) % CHAR_KEYS.length;
+            me.char = CHAR_KEYS[idx];
+            menuSel[0] = idx;
+            if (net.mode === 'host') broadcastLobby();
+            else if (net.connected && net.hostConn) {
+              try { net.hostConn.send({ t: 'pick', char: me.char }); } catch (e) {}
             }
           }
-        } else if (tap(ctrl.block)) {
-          menuConfirm[i] = false;
-          // In net mode, only tear down the connection if we never actually
-          // connected (still in pre-handshake). Once a peer is established
-          // — including in the post-match LOBBY — un-confirming should JUST
-          // un-mark the character pick. Tearing down here would invalidate
-          // the host's room code and drop the guest mid-lobby. Press ESC to
-          // explicitly leave the lobby.
-          if (net.mode !== 'local' && !net.everConnected) {
-            netCleanup();
-            net.statusText = '';
+          if (tap(ctrl.special)) {
+            me.ready = true;
+            if (net.mode === 'host') broadcastLobby();
+            else if (net.connected && net.hostConn) {
+              try { net.hostConn.send({ t: 'ready', ready: true }); } catch (e) {}
+            }
+          }
+        } else if (me && me.ready) {
+          if (tap(ctrl.block)) {
+            me.ready = false;
+            if (net.mode === 'host') broadcastLobby();
+            else if (net.connected && net.hostConn) {
+              try { net.hostConn.send({ t: 'ready', ready: false }); } catch (e) {}
+            }
           }
         }
-      }
-      // For online modes, mirror the picked char into netPending so a re-host/connect is consistent.
-      if (net.mode !== 'local' && netPending) {
-        if (net.mode === 'host') netPending.hostChar = CHAR_KEYS[menuSel[0]];
-        else netPending.guestChar = CHAR_KEYS[menuSel[1]];
-      }
-      // Start the match.
-      if (net.mode === 'local') {
-        if (tap('Enter') && menuConfirm[0] && menuConfirm[1]) startMatch();
-      } else if (net.mode === 'host') {
-        // Host needs both chars + connection, then ENTER to start.
-        if (tap('Enter') && menuConfirm[0] && netReadyToStart()) {
-          // Fresh seed per match so RNG outcomes (e.g. Jonah pellet spread)
-          // don't repeat in a rematch.
-          netPending.seed = (Math.random() * 0x7fffffff) | 0;
-          try { net.conn && net.conn.send({ t: 'startMatch', seed: netPending.seed }); } catch (e) {}
+        // Host: ENTER starts the match when ≥2 slots are filled and all ready.
+        if (net.mode === 'host' && tap('Enter') && lobbyReadyToStart()) {
+          net.seed = (Math.random() * 0x7fffffff) | 0;
+          const start = { t: 'start', slots: net.slots, seed: net.seed };
+          for (const slot in net.conns) {
+            try { net.conns[slot].send(start); } catch (e) {}
+          }
           beginNetMatch();
         }
-      } else {
-        // Guest waits for host's startMatch signal — handled in handleNetMsg.
       }
     }
 
@@ -10194,19 +10320,52 @@
         title = `ROOM ${net.roomCode}`;
       }
       ctx.fillText(title, W/2, yOff);
-      ctx.fillStyle = net.connected ? '#a0e0d0' : '#888';
-      ctx.font = '12px sans-serif';
-      const remoteChar = net.mode === 'host' ? (netPending && netPending.guestChar) : (netPending && netPending.hostChar);
-      if (remoteChar) {
-        ctx.fillStyle = CHARS[remoteChar].color;
-        ctx.fillText('opponent: ' + CHARS[remoteChar].name.toUpperCase(), W/2, yOff + 18);
-      } else {
-        ctx.fillStyle = '#888';
-        ctx.fillText(net.statusText || 'waiting...', W/2, yOff + 18);
+      // Lobby roster — show every slot and its pick + ready state.
+      if (net.slots) {
+        ctx.font = 'bold 13px sans-serif';
+        let occupied = 0;
+        for (let s = 0; s < MAX_PLAYERS; s++) {
+          const slot = net.slots[s];
+          const lx = W/2 + (s - (MAX_PLAYERS - 1) / 2) * 140;
+          const ly = yOff + 30;
+          ctx.fillStyle = '#22223a';
+          ctx.fillRect(lx - 60, ly, 120, 32);
+          if (slot && slot.occupied) {
+            occupied++;
+            const def = CHARS[slot.char] || CHARS[CHAR_KEYS[0]];
+            ctx.strokeStyle = slot.ready ? '#aaff6a' : def.color;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(lx - 60, ly, 120, 32);
+            ctx.fillStyle = def.color;
+            ctx.fillText(`P${s+1}  ${def.name.toUpperCase()}`, lx, ly + 14);
+            ctx.font = '11px sans-serif';
+            ctx.fillStyle = slot.ready ? '#aaff6a' : '#888';
+            ctx.fillText(slot.ready ? 'READY' : (s === net.localSlot ? 'PICKING' : 'WAITING'), lx, ly + 28);
+            ctx.font = 'bold 13px sans-serif';
+            if (s === net.localSlot) {
+              ctx.strokeStyle = '#ffeb3b';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(lx - 62, ly - 2, 124, 36);
+            }
+          } else {
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(lx - 60, ly, 120, 32);
+            ctx.fillStyle = '#555';
+            ctx.fillText(`SLOT ${s+1}`, lx, ly + 14);
+            ctx.font = '11px sans-serif';
+            ctx.fillText('open', lx, ly + 28);
+            ctx.font = 'bold 13px sans-serif';
+          }
+        }
       }
       if (net.error) {
         ctx.fillStyle = '#ff4444';
-        ctx.fillText('error: ' + net.error, W/2, yOff + 36);
+        ctx.fillText('error: ' + net.error, W/2, yOff + 80);
+      } else if (net.statusText) {
+        ctx.fillStyle = '#888';
+        ctx.font = '11px sans-serif';
+        ctx.fillText(net.statusText, W/2, yOff + 80);
       }
     }
 
@@ -10215,26 +10374,26 @@
     if (net.mode === 'local') {
       ctx.fillText('P1: A/D cycle, G confirm, L-Shift cancel      P2: ←/→ cycle, / confirm, R-Shift cancel', W/2, H - 55);
     } else if (net.mode === 'host') {
-      ctx.fillText('A/D cycle, G confirm, L-Shift cancel      Share the room code with a friend', W/2, H - 55);
+      ctx.fillText('A/D pick fighter · G ready/unready (L-Shift) · ENTER start match · share the room code', W/2, H - 55);
     } else {
-      ctx.fillText('A/D cycle, G confirm, L-Shift cancel      Connecting to host...', W/2, H - 55);
+      ctx.fillText('A/D pick fighter · G ready/unready (L-Shift) · wait for host to start', W/2, H - 55);
     }
-    let ready = false, label = 'Both players must confirm';
+    let ready = false, label = '';
     if (net.mode === 'local') {
       ready = menuConfirm[0] && menuConfirm[1];
       label = ready ? 'Press ENTER to fight!' : 'Both players must confirm';
     } else if (net.mode === 'host') {
-      ready = menuConfirm[0] && netReadyToStart();
-      label = ready ? 'Press ENTER to fight!'
-            : (!menuConfirm[0]) ? 'Confirm your fighter to host'
-            : !net.connected ? 'Waiting for guest to join...'
-            : 'Waiting for guest to pick a fighter...';
+      const occCount = net.slots ? net.slots.filter(s => s && s.occupied).length : 0;
+      ready = lobbyReadyToStart();
+      label = ready ? `Press ENTER to start (${occCount} players)!`
+            : occCount < 2 ? `Waiting for players (${occCount}/4, need ≥2)...`
+            : 'Waiting for everyone to ready up...';
     } else {
+      const me = net.slots && net.localSlot >= 0 ? net.slots[net.localSlot] : null;
       ready = false;
-      label = !menuConfirm[1] ? 'Confirm your fighter to join'
-            : !net.connected ? 'Connecting to host...'
-            : !netReadyToStart() ? 'Waiting for host to pick a fighter...'
-            : 'Waiting for host to start the match...';
+      label = !net.connected ? 'Connecting to host...'
+            : (me && me.ready) ? 'Waiting for host to start the match...'
+            : 'Pick your fighter and press G to ready up';
     }
     ctx.fillStyle = ready ? '#4ab8ff' : '#555';
     ctx.font = 'bold 14px sans-serif';
@@ -10626,47 +10785,78 @@
       snapshotInputsLocal();
       return true;
     }
-    // Capture and send local input EXACTLY ONCE per slot. Critical: while we're
-    // stuck waiting for a remote frame, we get called repeatedly with the same
-    // currentFrame, so targetFrame stays the same. If we re-captured and
-    // overwrote localBuf without re-sending, our local copy and the peer's view
-    // would diverge — we'd play frame F+3 with our latest input, but the peer
-    // would play it with whatever we sent first. Hence the .has() guard.
+
+    // ----- Capture & send local input for frame F+inputDelay (once) -----
+    // The .has() guard is critical: while we're stuck waiting for a remote
+    // frame this function gets called repeatedly with the same currentFrame
+    // (so the same targetFrame). Re-capturing would diverge from what we
+    // already sent — peers would see frame F+3 played with a different input
+    // than we played it with.
     const targetFrame = net.currentFrame + net.inputDelay;
     if (!net.localBuf.has(targetFrame)) {
       const localMask = captureLocalInputBits();
       net.localBuf.set(targetFrame, localMask);
-      if (net.connected && net.conn) {
-        try {
-          net.conn.send({ t: 'input', frame: targetFrame, mask: localMask });
-          net.lastSentFrame = targetFrame;
-        } catch (e) { /* connection may have closed */ }
+      const msg = { t: 'input', slot: net.localSlot, frame: targetFrame, mask: localMask };
+      if (net.mode === 'host') {
+        // Host broadcasts its own input to every connected guest, and stashes
+        // it in remoteBufs[localSlot] so the shared "all-slots-ready" check
+        // treats local and remote inputs uniformly.
+        for (const slot in net.conns) {
+          try { net.conns[slot].send(msg); } catch (e) {}
+        }
+      } else if (net.mode === 'guest' && net.connected && net.hostConn) {
+        try { net.hostConn.send(msg); } catch (e) {}
+      }
+      net.lastSentFrame = targetFrame;
+    }
+
+    // ----- Gather inputs for currentFrame from every occupied slot -----
+    const F = net.currentFrame;
+    const localForFrame = net.localBuf.get(F);
+    const N = net.slots ? net.slots.filter(s => s && s.occupied).length : 2;
+    const masks = new Array(MAX_PLAYERS).fill(undefined);
+    masks[net.localSlot] = localForFrame;
+    let haveAll = (localForFrame !== undefined);
+    let waitingOnAnySlot = false;
+    if (net.slots) {
+      for (let s = 0; s < MAX_PLAYERS; s++) {
+        if (s === net.localSlot) continue;
+        if (!net.slots[s] || !net.slots[s].occupied) continue;
+        const m = net.remoteBufs[s] && net.remoteBufs[s].get(F);
+        if (m === undefined) { haveAll = false; waitingOnAnySlot = true; }
+        else masks[s] = m;
       }
     }
-    // Lookup inputs for the frame we're currently trying to advance past.
-    const localForFrame = net.localBuf.get(net.currentFrame);
-    const remoteForFrame = net.remoteBuf.get(net.currentFrame);
-    if (localForFrame === undefined || remoteForFrame === undefined) {
-      // First few frames before the buffer fills, treat as no-input.
-      if (net.currentFrame < net.inputDelay) {
-        applyInputBitsToFrame(net.localIndex, localForFrame || 0);
-        applyInputBitsToFrame(1 - net.localIndex, remoteForFrame || 0);
+
+    if (!haveAll) {
+      // First few frames before the buffer fills — treat missing inputs as zero
+      // so peers can ramp up together. Any missing slot during this window is
+      // fine because the input-delay buffer hasn't been filled yet anywhere.
+      if (F < net.inputDelay) {
+        for (let s = 0; s < MAX_PLAYERS; s++) {
+          applyInputBitsToFrame(s, masks[s] || 0);
+        }
         net.waitingForRemote = false;
         net.currentFrame++;
         return true;
       }
-      // Past initial window — we're stuck waiting on remote input.
-      net.waitingForRemote = (remoteForFrame === undefined);
+      net.waitingForRemote = waitingOnAnySlot;
       return false;
     }
-    applyInputBitsToFrame(net.localIndex, localForFrame);
-    applyInputBitsToFrame(1 - net.localIndex, remoteForFrame);
+
+    for (let s = 0; s < MAX_PLAYERS; s++) {
+      applyInputBitsToFrame(s, masks[s] || 0);
+    }
     net.waitingForRemote = false;
-    // Cleanup old buffer entries
-    if (net.currentFrame % 60 === 0) {
-      const cutoff = net.currentFrame - 30;
+
+    // GC old buffer entries every second.
+    if (F % 60 === 0) {
+      const cutoff = F - 30;
       for (const k of net.localBuf.keys()) if (k < cutoff) net.localBuf.delete(k);
-      for (const k of net.remoteBuf.keys()) if (k < cutoff) net.remoteBuf.delete(k);
+      for (let s = 0; s < MAX_PLAYERS; s++) {
+        const buf = net.remoteBufs[s];
+        if (buf) for (const k of buf.keys()) if (k < cutoff) buf.delete(k);
+      }
     }
     net.currentFrame++;
     return true;
@@ -10725,10 +10915,18 @@
     stepStageHook();
     updateCamera();
     // Online: every 60 frames, exchange a state hash with the peer.
-    if (net.mode !== 'local' && net.connected && net.currentFrame > 0 && net.currentFrame % 60 === 0) {
+    if (net.mode !== 'local' && net.currentFrame > 0 && net.currentFrame % 60 === 0) {
       const h = computeStateHash();
       net.hashHistory.set(net.currentFrame, h);
-      try { net.conn && net.conn.send({ t: 'hash', frame: net.currentFrame, hash: h }); } catch (e) {}
+      const hashMsg = { t: 'hash', frame: net.currentFrame, hash: h };
+      // Hub-and-spoke: guests send to host, host sends to every guest.
+      if (net.mode === 'guest' && net.hostConn) {
+        try { net.hostConn.send(hashMsg); } catch (e) {}
+      } else if (net.mode === 'host') {
+        for (const slot in net.conns) {
+          try { net.conns[slot].send(hashMsg); } catch (e) {}
+        }
+      }
       for (const k of net.hashHistory.keys()) if (k < net.currentFrame - 600) net.hashHistory.delete(k);
     }
     const alive = fighters.filter(f => f.stocks > 0);
