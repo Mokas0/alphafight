@@ -7450,6 +7450,10 @@
         net.conns[slotIdx] = conn;
         net.slots[slotIdx] = { char: CHAR_KEYS[0], ready: false, occupied: true };
         net.everConnected = true;
+        // Host's `net.connected` = "at least one guest currently in the room."
+        // Required for the connection-loss bail-out (everConnected && !connected
+        // → return to menu) to NOT fire as soon as the first guest joins.
+        net.connected = true;
         net.statusText = `${Object.keys(net.conns).length+1}/4 connected`;
         try {
           conn.send({ t: 'welcome', slot: slotIdx, seed: net.seed, stage: currentStage });
@@ -7460,6 +7464,9 @@
       conn.on('close', () => {
         delete net.conns[slotIdx];
         if (net.slots) net.slots[slotIdx] = null;
+        // Only drop host's connected flag if ALL guests are gone — otherwise
+        // a single disconnect would bail the host out of an N>2 match.
+        net.connected = Object.keys(net.conns).length > 0;
         net.statusText = `slot ${slotIdx+1} disconnected`;
         broadcastLobby();
       });
@@ -11724,17 +11731,18 @@
       netCleanup();
       net.mode = 'local';
     }
-    // Connection-loss bail-out: only fire if the peer was actually connected at
-    // some point and has now dropped (net.everConnected true, net.connected false).
-    // Without the everConnected guard the check would fire during the legit
-    // "host created peer, no guest yet" window where peer != null but connected
-    // is still false.
-    if (net.mode !== 'local' && net.everConnected && !net.connected) {
+    // Connection-loss bail-out: only fire for GUESTS, and only if the host
+    // dropped after we'd successfully connected (net.everConnected true,
+    // net.connected false). For hosts, an empty room after a guest leaves is
+    // a legit "waiting for more players" state — never auto-bail them out;
+    // they can ESC manually. (The old guard was 2-player-specific and would
+    // dump the host whenever the last guest left.)
+    if (net.mode === 'guest' && net.everConnected && !net.connected) {
       state = STATE.MENU;
       menuConfirm = [false, false];
       menuStage = 'mode';
       winner = null;
-      net.error = net.error || 'peer disconnected';
+      net.error = net.error || 'host disconnected';
       netCleanup();
       net.mode = 'local';
     }
