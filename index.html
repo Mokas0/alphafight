@@ -84,6 +84,8 @@
       </div>
       <div class="row">
         <button id="spriteSaveBtn">SAVE</button>
+        <button id="spriteGenBtn">GENERATE FROM PROCEDURAL</button>
+        <button id="spriteDlBtn" class="ghost">DOWNLOAD PNG</button>
         <button id="spriteClearBtn" class="danger">CLEAR SPRITE</button>
         <button id="spriteCancelBtn" class="ghost">CANCEL</button>
       </div>
@@ -727,6 +729,94 @@
     spritePreviewAnim = null;
   }
 
+  // Drive the Fighter through a set of poses and stamp each frame into a
+  // sprite sheet using the game's own procedural draw code. The resulting
+  // PNG matches the in-battle look of the character exactly (flame tuft,
+  // scarf, weapon, etc.), and is a great starting point to refine in
+  // autosprite/Aseprite or to use as-is.
+  function generateProceduralSpriteSheet(key, frameW, frameH, counts) {
+    const cols = Math.max(counts.idle | 0, counts.run | 0, counts.jump | 0, counts.attack | 0, 1);
+    const sheet = document.createElement('canvas');
+    sheet.width = cols * frameW;
+    sheet.height = 4 * frameH;
+    const sctx = sheet.getContext('2d');
+    sctx.imageSmoothingEnabled = false;
+    sctx.clearRect(0, 0, sheet.width, sheet.height);
+
+    // Stub fighter — temporarily uninstall any uploaded sprite for this
+    // character so render() falls through to the procedural pipeline.
+    const wasInstalled = customSprites[key];
+    delete customSprites[key];
+    const f = new Fighter(key, 100, 1, 0);
+    const FAKE_GROUND_Y = 200;
+
+    // Pose presets. animTick drives every per-frame animation curve in
+    // render() (idle bob, gait cycle, hat sway, flame flicker). Setting
+    // attackCooldown > 0 re-targets the arm IK to a forward strike.
+    const presets = {
+      idle:   (fi, n) => ({ onGround: true,  vx: 0,    vy: 0,  attackCooldown: 0, animTick: (fi / n) * 78 }),
+      run:    (fi, n) => ({ onGround: true,  vx: 3.6,  vy: 0,  attackCooldown: 0, animTick: 20 + (fi / n) * 60 }),
+      jump:   (fi, n) => ({ onGround: false, vx: 0.5,  vy: fi === 0 ? -10 : 5, attackCooldown: 0, animTick: 40 + fi * 12 }),
+      attack: (fi, n) => ({ onGround: true,  vx: 0,    vy: 0,  attackCooldown: Math.max(1, 24 - fi * 8), animTick: 60 + fi * 6 }),
+    };
+    const states = ['idle', 'run', 'jump', 'attack'];
+
+    for (let row = 0; row < 4; row++) {
+      const state = states[row];
+      const n = counts[state] | 0;
+      if (n <= 0) continue;
+      for (let fi = 0; fi < n; fi++) {
+        const pose = presets[state](fi, n);
+        // Reset every per-frame visual var to a clean baseline, then apply pose.
+        f.x = 100;
+        f.y = FAKE_GROUND_Y - f.h;
+        f.facing = 1;
+        f.vx = pose.vx; f.vy = pose.vy;
+        f.onGround = pose.onGround;
+        f.attackCooldown = pose.attackCooldown;
+        f.animTick = pose.animTick;
+        f.moveState = null;
+        f.hitstun = 0;
+        f.squashTimer = 0;
+        f.helpless = false;
+        f.respawnTimer = 0;
+        f.ledgeGrab = null;
+        f.counterActive = 0;
+        f.poisonTimer = 0;
+        f.shieldBroken = 0;
+        f.blocking = false;
+
+        // Render to a per-frame offscreen canvas, scaled + translated so the
+        // fighter's body box fills the frame with a small margin for hats,
+        // weapons, and flame tufts.
+        const fc = document.createElement('canvas');
+        fc.width = frameW;
+        fc.height = frameH;
+        const fctx = fc.getContext('2d');
+        fctx.imageSmoothingEnabled = false;
+        // Body box is 36w × 60h. Give a margin so flair (Liam's pole, Drew's
+        // sword, Nico's flame, headgear) stays inside the frame.
+        const TARGET_W = 48;     // logical pixels we want the body box to occupy
+        const TARGET_H = 72;
+        const scale = Math.min(frameW / TARGET_W, frameH / TARGET_H);
+        // Translate so f's center-x maps to frame's center-x and f's feet (y+h)
+        // map to ~92% down the frame (leaving ground room).
+        const groundLine = frameH - 4;
+        fctx.translate(frameW / 2 - f.cx * scale, groundLine - (f.y + f.h) * scale);
+        fctx.scale(scale, scale);
+        try { f.render(fctx); } catch (e) { console.warn('frame render failed', state, fi, e); }
+
+        sctx.drawImage(fc, fi * frameW, row * frameH);
+      }
+    }
+
+    // Restore prior installed sprite if any (we removed it above so render()
+    // wouldn't recurse into the sprite path).
+    if (wasInstalled) customSprites[key] = wasInstalled;
+
+    return sheet.toDataURL('image/png');
+  }
+
   // Bind UI handlers once at startup. Use a small init function so we can
   // safely run it after the DOM exists.
   function initSpriteManagerUI() {
@@ -754,6 +844,38 @@
     });
     document.getElementById('spriteCancelBtn').addEventListener('click', closeSpriteEditor);
     document.getElementById('spriteCloseBtn').addEventListener('click', closeSpriteManager);
+    // Render the character's procedural look into a sheet, stash the result
+    // as the editor's pending PNG (preview canvas will pick it up), so the
+    // user can SAVE to install or DOWNLOAD PNG to refine elsewhere.
+    document.getElementById('spriteGenBtn').addEventListener('click', () => {
+      if (!spriteEditingKey) return;
+      const frameW = parseInt(document.getElementById('spriteFrameW').value, 10) || SPRITE_DEFAULTS.frameW;
+      const frameH = parseInt(document.getElementById('spriteFrameH').value, 10) || SPRITE_DEFAULTS.frameH;
+      const counts = {
+        idle:   parseInt(document.getElementById('spriteFramesIdle').value, 10) || 0,
+        run:    parseInt(document.getElementById('spriteFramesRun').value, 10) || 0,
+        jump:   parseInt(document.getElementById('spriteFramesJump').value, 10) || 0,
+        attack: parseInt(document.getElementById('spriteFramesAttack').value, 10) || 0,
+      };
+      try {
+        spritePreviewPendingUrl = generateProceduralSpriteSheet(spriteEditingKey, frameW, frameH, counts);
+        document.getElementById('spriteFile').value = '';
+      } catch (e) {
+        console.error(e);
+        alert('Sprite generation failed: ' + e.message);
+      }
+    });
+    document.getElementById('spriteDlBtn').addEventListener('click', () => {
+      const url = spritePreviewPendingUrl
+               || (customSprites[spriteEditingKey] && customSprites[spriteEditingKey].imgUrl);
+      if (!url) { alert('No sprite to download yet — upload or GENERATE first.'); return; }
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (spriteEditingKey || 'sprite') + '_sheet.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
     // ESC closes overlay (or editor first if open).
     window.addEventListener('keydown', (e) => {
       if (e.key === 'Escape' && document.getElementById('spriteMgr').classList.contains('open')) {
