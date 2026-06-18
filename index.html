@@ -7,6 +7,34 @@
   .key { display: inline-block; background: #2a2a3a; padding: 2px 6px; border-radius: 3px; color: #fff; font-family: monospace; font-size: 11px; }
   h1 { font-size: 20px; margin-bottom: 8px; letter-spacing: 2px; color: #ff6a2a; }
   h1 span { color: #4ab8ff; }
+
+  /* ---- Sprite manager overlay ---- */
+  #spriteMgr { position: fixed; inset: 0; background: rgba(8, 8, 16, 0.92); z-index: 9999; display: none; overflow-y: auto; padding: 24px; }
+  #spriteMgr.open { display: block; }
+  #spriteMgr .panel { max-width: 980px; margin: 0 auto; background: #15152a; border: 2px solid #3a3a55; border-radius: 10px; padding: 24px; }
+  #spriteMgr h2 { color: #4ab8ff; margin-bottom: 6px; letter-spacing: 1px; }
+  #spriteMgr .lead { color: #aaa; font-size: 13px; margin-bottom: 18px; line-height: 1.5; }
+  #spriteMgr .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 22px; }
+  #spriteMgr .card { background: #1f1f3a; border: 2px solid #333; border-radius: 8px; padding: 12px; cursor: pointer; transition: border 0.15s; }
+  #spriteMgr .card:hover { border-color: #4ab8ff; }
+  #spriteMgr .card.has { border-color: #5aaf3a; }
+  #spriteMgr .card .name { color: #fff; font-weight: bold; margin-bottom: 6px; }
+  #spriteMgr .card .status { color: #888; font-size: 11px; }
+  #spriteMgr .card.has .status { color: #5aaf3a; }
+  #spriteMgr .editor { display: none; background: #1f1f3a; border: 2px solid #4ab8ff; border-radius: 8px; padding: 16px; }
+  #spriteMgr .editor.open { display: block; }
+  #spriteMgr .editor h3 { color: #ffeb3b; margin-bottom: 10px; }
+  #spriteMgr .editor .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  #spriteMgr .editor label { color: #ccc; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+  #spriteMgr .editor input[type=number] { width: 64px; background: #0a0a16; color: #fff; border: 1px solid #444; padding: 4px 6px; border-radius: 4px; }
+  #spriteMgr .editor input[type=file] { color: #ccc; font-size: 12px; }
+  #spriteMgr .editor .preview { background: #0a0a16; padding: 10px; border-radius: 6px; margin: 10px 0; image-rendering: pixelated; }
+  #spriteMgr .editor canvas { image-rendering: pixelated; image-rendering: crisp-edges; background: #0a0a16; display: block; }
+  #spriteMgr button { background: #4ab8ff; color: #0a0a12; border: none; padding: 8px 16px; border-radius: 5px; font-weight: bold; cursor: pointer; margin-right: 8px; font-size: 13px; }
+  #spriteMgr button.danger { background: #ff4444; color: #fff; }
+  #spriteMgr button.ghost { background: #333; color: #fff; }
+  #spriteMgr button:hover { filter: brightness(1.1); }
+  #spriteMgr .hint { color: #888; font-size: 11px; font-style: italic; margin: 8px 0; }
 </style>
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -18,6 +46,51 @@
     <b style="color:#ff6a2a">P1</b>: <span class="key">WASD</span> move/jump &nbsp; <span class="key">L-Shift</span> block &nbsp; <span class="key">F</span> attack (+direction for tilts/aerials) &nbsp; <span class="key">G</span> special (+direction)<br>
     <b style="color:#4ab8ff">P2</b>: <span class="key">Arrows</span> move/jump &nbsp; <span class="key">R-Shift</span> block &nbsp; <span class="key">.</span> attack (+direction) &nbsp; <span class="key">/</span> special (+direction)<br>
     Character select on title screen. Press <span class="key">Enter</span> to start / restart. First to knock the other off 3 times wins.
+  </div>
+</div>
+
+<!-- Sprite manager overlay — opened from the SPRITES menu entry. Lets users
+     upload per-character pixel sprite sheets that replace the procedural body. -->
+<div id="spriteMgr">
+  <div class="panel">
+    <h2>PIXEL SPRITES</h2>
+    <p class="lead">
+      Upload a sprite sheet per character. Sheets should be a vertical stack of
+      4 rows of frames — top to bottom: <b>idle</b>, <b>run</b>, <b>jump</b>,
+      <b>attack</b>. Pixel-art crisp rendering is applied automatically.
+      Sprites are saved in your browser (localStorage) and persist between
+      sessions. Press <span class="key">ESC</span> or click CLOSE to return.
+    </p>
+    <div id="spriteGrid" class="grid"></div>
+    <div id="spriteEditor" class="editor">
+      <h3 id="spriteEditorTitle">EDITING</h3>
+      <div class="row">
+        <label>PNG sheet: <input type="file" id="spriteFile" accept="image/png,image/*"></label>
+      </div>
+      <div class="row">
+        <label>Frame width <input type="number" id="spriteFrameW" min="1" max="512" value="32"></label>
+        <label>Frame height <input type="number" id="spriteFrameH" min="1" max="512" value="48"></label>
+        <label>FPS <input type="number" id="spriteFps" min="1" max="60" value="8"></label>
+      </div>
+      <div class="row">
+        <label>Idle frames <input type="number" id="spriteFramesIdle" min="0" max="32" value="4"></label>
+        <label>Run frames <input type="number" id="spriteFramesRun" min="0" max="32" value="6"></label>
+        <label>Jump frames <input type="number" id="spriteFramesJump" min="0" max="32" value="2"></label>
+        <label>Attack frames <input type="number" id="spriteFramesAttack" min="0" max="32" value="3"></label>
+      </div>
+      <p class="hint">Set frames to 0 to fall back to the idle row for that state.</p>
+      <div class="preview">
+        <canvas id="spritePreview" width="320" height="240"></canvas>
+      </div>
+      <div class="row">
+        <button id="spriteSaveBtn">SAVE</button>
+        <button id="spriteClearBtn" class="danger">CLEAR SPRITE</button>
+        <button id="spriteCancelBtn" class="ghost">CANCEL</button>
+      </div>
+    </div>
+    <div class="row" style="margin-top: 18px;">
+      <button id="spriteCloseBtn" class="ghost">CLOSE</button>
+    </div>
   </div>
 </div>
 
@@ -34,7 +107,17 @@
   // firing between two sim frames) would be missed because keys[code] reads false
   // by the time the next frame runs. Symptom: specials sometimes don't fire.
   const keyPressLatch = {};
+  // When the user is focused inside an input/textarea (e.g., typing a number
+  // into the sprite manager), don't capture the keystroke into the game's
+  // input map — they're typing UI text, not playing the game.
+  function isTypingInForm(e) {
+    const t = e.target;
+    if (!t) return false;
+    const tag = (t.tagName || '').toUpperCase();
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
+  }
   window.addEventListener('keydown', e => {
+    if (isTypingInForm(e)) return;
     keys[e.code] = true;
     keyPressLatch[e.code] = true;
     // Lazy-init audio on first user gesture (browser autoplay policy)
@@ -45,7 +128,7 @@
     }
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
   });
-  window.addEventListener('keyup', e => { keys[e.code] = false; });
+  window.addEventListener('keyup', e => { if (!isTypingInForm(e)) keys[e.code] = false; });
   function isHeld(code) { return !!(keys[code] || keyPressLatch[code]); }
   function consumeKeyLatch() { for (const k in keyPressLatch) delete keyPressLatch[k]; }
 
@@ -425,6 +508,261 @@
     }
   };
   const CHAR_KEYS = ['nico', 'derek', 'rhys', 'greyson', 'kele', 'jonah', 'theo', 'cole', 'angus', 'aidan', 'liam', 'colton', 'donny', 'drew', 'whitney'];
+
+  // ---------- USER-UPLOADED PIXEL SPRITES ----------
+  // Per-character sprite sheets uploaded by the user. When a sheet is present
+  // for a character, Fighter.render() draws the appropriate animation frame
+  // (idle/run/jump/attack) from the sheet instead of the procedural body+head
+  // +arms+legs. All other overlays (status flashes, counter ring, character
+  // flair like weapons, shield, etc.) still render on top of the sprite.
+  //
+  // Sheet layout convention: 4 horizontal rows, top to bottom
+  //   row 0: idle frames
+  //   row 1: run frames
+  //   row 2: jump frames
+  //   row 3: attack frames
+  // Frame counts per row are configurable; missing rows fall back to idle.
+  //
+  // Persisted as JSON in localStorage. PNGs stored as data URLs (~50KB each
+  // for a typical 4-row sheet of 32×48 frames — well under the 5–10MB quota
+  // even with all 15 characters covered).
+  const SPRITE_STORAGE_KEY = 'alphafight_sprites_v1';
+  const customSprites = {};  // key → { img, imgReady, frameW, frameH, frames: {idle, run, jump, attack}, fps, imgUrl }
+  const SPRITE_DEFAULTS = { frameW: 32, frameH: 48, frames: { idle: 4, run: 6, jump: 2, attack: 3 }, fps: 8 };
+
+  function loadCustomSprites() {
+    try {
+      const raw = localStorage.getItem(SPRITE_STORAGE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      for (const k of Object.keys(data)) {
+        if (!CHAR_KEYS.includes(k)) continue;
+        installCustomSprite(k, data[k]);
+      }
+    } catch (e) {
+      console.warn('Failed to load custom sprites:', e);
+    }
+  }
+
+  function installCustomSprite(key, meta) {
+    const img = new Image();
+    const entry = {
+      img, imgReady: false,
+      frameW: meta.frameW || SPRITE_DEFAULTS.frameW,
+      frameH: meta.frameH || SPRITE_DEFAULTS.frameH,
+      frames: Object.assign({}, SPRITE_DEFAULTS.frames, meta.frames || {}),
+      fps: meta.fps || SPRITE_DEFAULTS.fps,
+      imgUrl: meta.imgUrl,
+    };
+    img.onload = () => { entry.imgReady = true; };
+    img.onerror = () => { console.warn('Sprite failed to decode for', key); };
+    img.src = meta.imgUrl;
+    customSprites[key] = entry;
+  }
+
+  function saveCustomSprite(key, meta) {
+    installCustomSprite(key, meta);
+    try {
+      const raw = localStorage.getItem(SPRITE_STORAGE_KEY);
+      const data = raw ? JSON.parse(raw) : {};
+      data[key] = meta;
+      localStorage.setItem(SPRITE_STORAGE_KEY, JSON.stringify(data));
+    } catch (e) {
+      console.warn('Failed to persist sprite:', e);
+    }
+  }
+
+  function clearCustomSprite(key) {
+    delete customSprites[key];
+    try {
+      const raw = localStorage.getItem(SPRITE_STORAGE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      delete data[key];
+      localStorage.setItem(SPRITE_STORAGE_KEY, JSON.stringify(data));
+    } catch (e) {}
+  }
+
+  // ---------- SPRITE MANAGER (HTML OVERLAY) ----------
+  // Editor state — which character is currently being edited. The DOM
+  // overlay was injected at page top; here we wire up its event handlers
+  // and the preview-animation render loop.
+  let spriteEditingKey = null;
+  let spritePreviewAnim = null;            // { img, frameW, frameH, frames, fps, raf }
+  let spritePreviewTick = 0;
+  let spritePreviewPendingUrl = null;       // newly-uploaded url not yet saved
+
+  function openSpriteManager() {
+    const mgr = document.getElementById('spriteMgr');
+    if (!mgr) return;
+    rebuildSpriteGrid();
+    closeSpriteEditor();
+    mgr.classList.add('open');
+  }
+
+  function closeSpriteManager() {
+    const mgr = document.getElementById('spriteMgr');
+    if (mgr) mgr.classList.remove('open');
+    stopSpritePreview();
+  }
+
+  function rebuildSpriteGrid() {
+    const grid = document.getElementById('spriteGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    for (const key of CHAR_KEYS) {
+      const card = document.createElement('div');
+      card.className = 'card' + (customSprites[key] ? ' has' : '');
+      card.innerHTML = `<div class="name">${(CHARS[key] && CHARS[key].name || key).toUpperCase()}</div>
+                        <div class="status">${customSprites[key] ? 'sprite uploaded' : 'procedural (default)'}</div>`;
+      card.addEventListener('click', () => openSpriteEditor(key));
+      grid.appendChild(card);
+    }
+  }
+
+  function openSpriteEditor(key) {
+    spriteEditingKey = key;
+    spritePreviewPendingUrl = null;
+    const ed = document.getElementById('spriteEditor');
+    document.getElementById('spriteEditorTitle').textContent = 'EDITING — ' + ((CHARS[key] && CHARS[key].name) || key).toUpperCase();
+    // Pre-fill with existing values if already uploaded, else defaults.
+    const existing = customSprites[key];
+    const src = existing || SPRITE_DEFAULTS;
+    document.getElementById('spriteFrameW').value = src.frameW || SPRITE_DEFAULTS.frameW;
+    document.getElementById('spriteFrameH').value = src.frameH || SPRITE_DEFAULTS.frameH;
+    document.getElementById('spriteFps').value = src.fps || SPRITE_DEFAULTS.fps;
+    const fr = src.frames || SPRITE_DEFAULTS.frames;
+    document.getElementById('spriteFramesIdle').value = fr.idle;
+    document.getElementById('spriteFramesRun').value = fr.run;
+    document.getElementById('spriteFramesJump').value = fr.jump;
+    document.getElementById('spriteFramesAttack').value = fr.attack;
+    document.getElementById('spriteFile').value = '';
+    ed.classList.add('open');
+    startSpritePreview();
+  }
+
+  function closeSpriteEditor() {
+    const ed = document.getElementById('spriteEditor');
+    if (ed) ed.classList.remove('open');
+    spriteEditingKey = null;
+    stopSpritePreview();
+  }
+
+  function currentEditorMeta() {
+    const url = spritePreviewPendingUrl
+             || (customSprites[spriteEditingKey] && customSprites[spriteEditingKey].imgUrl);
+    if (!url) return null;
+    return {
+      imgUrl: url,
+      frameW: parseInt(document.getElementById('spriteFrameW').value, 10) || SPRITE_DEFAULTS.frameW,
+      frameH: parseInt(document.getElementById('spriteFrameH').value, 10) || SPRITE_DEFAULTS.frameH,
+      fps:    parseInt(document.getElementById('spriteFps').value, 10) || SPRITE_DEFAULTS.fps,
+      frames: {
+        idle:   parseInt(document.getElementById('spriteFramesIdle').value, 10) || 0,
+        run:    parseInt(document.getElementById('spriteFramesRun').value, 10) || 0,
+        jump:   parseInt(document.getElementById('spriteFramesJump').value, 10) || 0,
+        attack: parseInt(document.getElementById('spriteFramesAttack').value, 10) || 0,
+      },
+    };
+  }
+
+  // Animated preview: cycles through idle → run → jump → attack rows on a
+  // 1-second-per-state rotation so the user can verify every animation.
+  function startSpritePreview() {
+    stopSpritePreview();
+    const canvas = document.getElementById('spritePreview');
+    if (!canvas) return;
+    const pctx = canvas.getContext('2d');
+    pctx.imageSmoothingEnabled = false;
+    spritePreviewAnim = { img: null, raf: 0 };
+    const loadFromUrl = (url) => {
+      if (!url) return;
+      const img = new Image();
+      img.onload = () => { spritePreviewAnim.img = img; };
+      img.src = url;
+    };
+    const existingUrl = customSprites[spriteEditingKey] && customSprites[spriteEditingKey].imgUrl;
+    if (existingUrl) loadFromUrl(existingUrl);
+    spritePreviewTick = 0;
+    const ROWS = ['idle', 'run', 'jump', 'attack'];
+    function frame() {
+      spritePreviewTick++;
+      pctx.fillStyle = '#0a0a16';
+      pctx.fillRect(0, 0, canvas.width, canvas.height);
+      const meta = currentEditorMeta();
+      if (spritePreviewPendingUrl && (!spritePreviewAnim.img || spritePreviewAnim.img.src !== spritePreviewPendingUrl)) {
+        loadFromUrl(spritePreviewPendingUrl);
+      }
+      const img = spritePreviewAnim.img;
+      if (img && meta) {
+        const stateIdx = Math.floor(spritePreviewTick / 60) % 4;
+        const state = ROWS[stateIdx];
+        const frames = meta.frames[state] || meta.frames.idle || 1;
+        const row = state === 'idle' ? 0 : state === 'run' ? 1 : state === 'jump' ? 2 : 3;
+        const af = Math.floor(spritePreviewTick * meta.fps / 60) % Math.max(1, frames);
+        const sx = af * meta.frameW;
+        const sy = row * meta.frameH;
+        // Draw at 4× scale, centered.
+        const scale = 4;
+        const dw = meta.frameW * scale;
+        const dh = meta.frameH * scale;
+        const dx = (canvas.width - dw) / 2;
+        const dy = (canvas.height - dh) / 2;
+        try { pctx.drawImage(img, sx, sy, meta.frameW, meta.frameH, dx, dy, dw, dh); } catch (e) {}
+        pctx.fillStyle = '#aaa';
+        pctx.font = '11px monospace';
+        pctx.fillText(state.toUpperCase() + ' · frame ' + (af + 1) + '/' + Math.max(1, frames), 10, 18);
+      } else {
+        pctx.fillStyle = '#666';
+        pctx.font = '12px sans-serif';
+        pctx.fillText('No sprite yet — pick a PNG above.', 10, 30);
+      }
+      spritePreviewAnim.raf = requestAnimationFrame(frame);
+    }
+    spritePreviewAnim.raf = requestAnimationFrame(frame);
+  }
+
+  function stopSpritePreview() {
+    if (spritePreviewAnim && spritePreviewAnim.raf) cancelAnimationFrame(spritePreviewAnim.raf);
+    spritePreviewAnim = null;
+  }
+
+  // Bind UI handlers once at startup. Use a small init function so we can
+  // safely run it after the DOM exists.
+  function initSpriteManagerUI() {
+    const fileIn = document.getElementById('spriteFile');
+    if (!fileIn) return;
+    fileIn.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => { spritePreviewPendingUrl = reader.result; };
+      reader.readAsDataURL(f);
+    });
+    document.getElementById('spriteSaveBtn').addEventListener('click', () => {
+      const meta = currentEditorMeta();
+      if (!meta) { alert('Please upload a PNG first.'); return; }
+      saveCustomSprite(spriteEditingKey, meta);
+      rebuildSpriteGrid();
+      closeSpriteEditor();
+    });
+    document.getElementById('spriteClearBtn').addEventListener('click', () => {
+      if (!spriteEditingKey) return;
+      clearCustomSprite(spriteEditingKey);
+      rebuildSpriteGrid();
+      closeSpriteEditor();
+    });
+    document.getElementById('spriteCancelBtn').addEventListener('click', closeSpriteEditor);
+    document.getElementById('spriteCloseBtn').addEventListener('click', closeSpriteManager);
+    // ESC closes overlay (or editor first if open).
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && document.getElementById('spriteMgr').classList.contains('open')) {
+        if (document.getElementById('spriteEditor').classList.contains('open')) closeSpriteEditor();
+        else closeSpriteManager();
+        e.stopPropagation();
+      }
+    });
+  }
 
   // ---------- CONTROL MAPS ----------
   // Slots 0 + 1 use the real keyboard schemes (local 2P uses both, online uses
@@ -4236,6 +4574,43 @@
       drawLimb(this.cx + fwd * shDX, shY, ftx, ftY, upper, fore, fbend, 5, armColor, handColor, 3);
     }
 
+    // Pick one of {idle, run, jump, attack} based on fighter state. Used as
+    // the row selector for user-uploaded sprite sheets.
+    animState() {
+      if (!this.onGround) return 'jump';
+      if (this.attackCooldown > 0 || (this.moveState && /attack|jab|punch|kick|slash|swing|stab|throw|spike|smash/i.test(this.moveState.type))) return 'attack';
+      if (Math.abs(this.vx) > 0.5) return 'run';
+      return 'idle';
+    }
+
+    // If a sprite sheet is uploaded for this character, draw the current
+    // animation frame in place of the procedural body+head+arms+legs and
+    // return true (caller skips procedural). Returns false otherwise.
+    tryDrawSpriteSheet(ctx, bodyX, bodyY, bodyW, bodyH) {
+      const sf = customSprites[this.key];
+      if (!sf || !sf.imgReady) return false;
+      let state = this.animState();
+      let frames = sf.frames[state] || 0;
+      if (frames <= 0) { state = 'idle'; frames = sf.frames.idle || 1; }
+      const ROWS = { idle: 0, run: 1, jump: 2, attack: 3 };
+      const row = ROWS[state];
+      const animFrame = Math.floor(this.animTick * sf.fps / 60) % Math.max(1, frames);
+      const sx = animFrame * sf.frameW;
+      const sy = row * sf.frameH;
+      ctx.save();
+      ctx.imageSmoothingEnabled = false;     // keep pixel art crisp
+      if (this.facing === -1) {
+        ctx.translate(this.cx, 0);
+        ctx.scale(-1, 1);
+        ctx.translate(-this.cx, 0);
+      }
+      try {
+        ctx.drawImage(sf.img, sx, sy, sf.frameW, sf.frameH, bodyX, bodyY, bodyW, bodyH);
+      } catch (e) { ctx.restore(); return false; }
+      ctx.restore();
+      return true;
+    }
+
     render(ctx) {
       if (this.respawnTimer > 0) return;
       const c = this.def;
@@ -4436,42 +4811,48 @@
       ctx.rotate(leanRad);
       ctx.translate(-this.cx, -(this.y + this.h));
 
-      // Legs drawn BEHIND the torso (skeletal IK). The torso fill is shortened
-      // at the bottom so the lower legs + feet show beneath it.
-      this.drawLegs(ctx, bodyX, bodyY, bodyW, bodyH);
+      // User-uploaded sprite sheet completely replaces the procedural body
+      // pipeline (legs + torso + head + arms). All other rendering — counter
+      // ring, ledge hang, character flair (weapons, hats), shield, status
+      // flashes, player indicator — still draws on top.
+      if (!this.tryDrawSpriteSheet(ctx, bodyX, bodyY, bodyW, bodyH)) {
+        // Legs drawn BEHIND the torso (skeletal IK). The torso fill is shortened
+        // at the bottom so the lower legs + feet show beneath it.
+        this.drawLegs(ctx, bodyX, bodyY, bodyW, bodyH);
 
-      // Body — torso fill stops short of the foot line to reveal the legs.
-      const torsoH = bodyH - 14;
-      ctx.fillStyle = c.color;
-      ctx.fillRect(bodyX, bodyY, bodyW, torsoH);
-      // Accent stripe (proportional to body size, stays at relative 30% from top)
-      ctx.fillStyle = c.color2;
-      const stripeY = bodyY + bodyH * 0.30;
-      const stripeH = bodyH * 0.13;
-      ctx.fillRect(bodyX, stripeY, bodyW, stripeH);
+        // Body — torso fill stops short of the foot line to reveal the legs.
+        const torsoH = bodyH - 14;
+        ctx.fillStyle = c.color;
+        ctx.fillRect(bodyX, bodyY, bodyW, torsoH);
+        // Accent stripe (proportional to body size, stays at relative 30% from top)
+        ctx.fillStyle = c.color2;
+        const stripeY = bodyY + bodyH * 0.30;
+        const stripeH = bodyH * 0.13;
+        ctx.fillRect(bodyX, stripeY, bodyW, stripeH);
 
-      // Head — also gets the bob, plus a slight bob-in-place when idle
-      const headW = 20, headH = 16;
-      const headX = bodyX + (bodyW - headW) / 2;
-      const headY = bodyY + 2;
-      ctx.fillStyle = '#ffddba';
-      ctx.fillRect(headX, headY, headW, headH);
+        // Head — also gets the bob, plus a slight bob-in-place when idle
+        const headW = 20, headH = 16;
+        const headX = bodyX + (bodyW - headW) / 2;
+        const headY = bodyY + 2;
+        ctx.fillStyle = '#ffddba';
+        ctx.fillRect(headX, headY, headW, headH);
 
-      // Eye (shows facing)
-      ctx.fillStyle = '#222';
-      if (this.facing === 1) ctx.fillRect(headX + 14, headY + 6, 4, 4);
-      else ctx.fillRect(headX + 2, headY + 6, 4, 4);
+        // Eye (shows facing)
+        ctx.fillStyle = '#222';
+        if (this.facing === 1) ctx.fillRect(headX + 14, headY + 6, 4, 4);
+        else ctx.fillRect(headX + 2, headY + 6, 4, 4);
 
-      // Character emblem (initial of name)
-      ctx.fillStyle = '#000';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(c.name[0], this.cx, bodyY + bodyH * 0.7);
+        // Character emblem (initial of name)
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(c.name[0], this.cx, bodyY + bodyH * 0.7);
 
-      // Arms drawn IN FRONT of the torso/head (skeletal IK). During a special /
-      // attack the front hand auto-targets the action (hitbox or cast point);
-      // otherwise it follows the locomotion gait.
-      this.drawArms(ctx, bodyX, bodyY, bodyW, bodyH);
+        // Arms drawn IN FRONT of the torso/head (skeletal IK). During a special /
+        // attack the front hand auto-targets the action (hitbox or cast point);
+        // otherwise it follows the locomotion gait.
+        this.drawArms(ctx, bodyX, bodyY, bodyW, bodyH);
+      }
 
       ctx.restore();
 
@@ -9404,7 +9785,7 @@
   let menuModeIdx = 0;          // 0=LOCAL, 1=HOST, 2=JOIN, 3=MOVESETS
   let menuStadiumIdx = 0;       // index into STAGE_KEYS
   let joinCodeInput = '';
-  const MODE_LABELS = ['LOCAL 2P', 'HOST PARTY', 'JOIN PARTY', 'MOVESET KEY'];
+  const MODE_LABELS = ['LOCAL 2P', 'HOST PARTY', 'JOIN PARTY', 'MOVESET KEY', 'SPRITES'];
   const ROOM_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
   function updateMenu() {
@@ -9432,9 +9813,12 @@
           net.mode = 'guest';
           joinCodeInput = '';
           menuStage = 'code';
-        } else {
+        } else if (menuModeIdx === 3) {
           // MOVESET KEY — open the moveset reference panel.
           menuStage = 'movesets';
+        } else {
+          // SPRITES — open the user-upload pixel-sprite manager (HTML overlay).
+          openSpriteManager();
         }
       }
     } else if (menuStage === 'stadium') {
@@ -9865,14 +10249,21 @@
 
     if (menuStage === 'mode') {
       ctx.fillText('Choose mode', W/2, 108);
-      // Four mode buttons in a 2x2 grid
-      const btnW = 220, btnH = 60, gapX = 30, gapY = 16;
-      const totalW = 2 * btnW + gapX;
-      const totalH = 2 * btnH + gapY;
-      const startX = W/2 - totalW/2;
+      // Mode buttons in a 3-wide grid: 2 rows (top-row 3 buttons, bottom-row 2).
+      const btnW = 200, btnH = 56, gapX = 22, gapY = 14;
+      const colsPerRow = 3;
+      const rowCount = Math.ceil(MODE_LABELS.length / colsPerRow);
+      const totalH = rowCount * btnH + (rowCount - 1) * gapY;
       const startY = H/2 - totalH/2 + 10;
       for (let m = 0; m < MODE_LABELS.length; m++) {
-        const col = m % 2, row = (m / 2) | 0;
+        const row = Math.floor(m / colsPerRow);
+        const col = m % colsPerRow;
+        // Each row centres the buttons it actually contains, so the trailing
+        // partial row sits flush under the centre of the row above it.
+        const rowStart = row * colsPerRow;
+        const rowLen = Math.min(colsPerRow, MODE_LABELS.length - rowStart);
+        const rowTotalW = rowLen * btnW + (rowLen - 1) * gapX;
+        const startX = W/2 - rowTotalW/2;
         const bx = startX + col * (btnW + gapX);
         const by = startY + row * (btnH + gapY);
         const sel = m === menuModeIdx;
@@ -9882,8 +10273,8 @@
         ctx.lineWidth = sel ? 3 : 1.5;
         ctx.strokeRect(bx, by, btnW, btnH);
         ctx.fillStyle = sel ? '#ffeb3b' : '#aaa';
-        ctx.font = 'bold 20px sans-serif';
-        ctx.fillText(MODE_LABELS[m], bx + btnW/2, by + btnH/2 + 7);
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillText(MODE_LABELS[m], bx + btnW/2, by + btnH/2 + 6);
       }
       ctx.fillStyle = '#888';
       ctx.font = '12px sans-serif';
@@ -11087,6 +11478,13 @@
     renderFrame();
     requestAnimationFrame(loop);
   }
+
+  // Load user-uploaded sprite sheets from localStorage + wire up the sprite
+  // manager overlay's DOM event handlers. Both safe to call before the game
+  // loop starts since they only touch elements that exist in the static
+  // HTML at top of file.
+  loadCustomSprites();
+  initSpriteManagerUI();
 
   requestAnimationFrame(loop);
 })();
