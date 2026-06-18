@@ -68,8 +68,8 @@
         <label>PNG sheet: <input type="file" id="spriteFile" accept="image/png,image/*"></label>
       </div>
       <div class="row">
-        <label>Frame width <input type="number" id="spriteFrameW" min="1" max="512" value="32"></label>
-        <label>Frame height <input type="number" id="spriteFrameH" min="1" max="512" value="48"></label>
+        <label>Frame width <input type="number" id="spriteFrameW" min="1" max="1024" value="32"></label>
+        <label>Frame height <input type="number" id="spriteFrameH" min="1" max="1024" value="48"></label>
         <label>FPS <input type="number" id="spriteFps" min="1" max="60" value="8"></label>
       </div>
       <div class="row">
@@ -78,7 +78,7 @@
         <label>Jump frames <input type="number" id="spriteFramesJump" min="0" max="32" value="2"></label>
         <label>Attack frames <input type="number" id="spriteFramesAttack" min="0" max="32" value="3"></label>
       </div>
-      <p class="hint">Set frames to 0 to fall back to the idle row for that state.</p>
+      <p class="hint">Set frames to 0 to fall back to the idle row for that state. Frame sizes &gt; 96 px enable smoothed downscaling for AI-generated hi-res art; smaller sizes keep the crisp pixel-art look.</p>
       <div class="preview">
         <canvas id="spritePreview" width="320" height="240"></canvas>
       </div>
@@ -704,8 +704,16 @@
         const af = Math.floor(spritePreviewTick * meta.fps / 60) % Math.max(1, frames);
         const sx = af * meta.frameW;
         const sy = row * meta.frameH;
-        // Draw at 4× scale, centered.
-        const scale = 4;
+        // Fit-to-preview scale. Up to 4× for tiny pixel-art frames, down to
+        // <1× for large frames (e.g., 256-px high-res sheets) so they never
+        // overflow the 320×240 preview canvas.
+        const previewPad = 28;
+        const maxScale = Math.min((canvas.width - 20) / meta.frameW,
+                                  (canvas.height - previewPad) / meta.frameH);
+        const scale = Math.max(0.25, Math.min(4, maxScale));
+        // For non-integer down-scales, enable smoothing so big sheets shrink
+        // cleanly. Integer up-scales keep smoothing off for crisp pixel art.
+        pctx.imageSmoothingEnabled = (scale < 1);
         const dw = meta.frameW * scale;
         const dh = meta.frameH * scale;
         const dx = (canvas.width - dw) / 2;
@@ -4720,7 +4728,14 @@
       const sx = animFrame * sf.frameW;
       const sy = row * sf.frameH;
       ctx.save();
-      ctx.imageSmoothingEnabled = false;     // keep pixel art crisp
+      // Smoothing policy: low-res pixel art (frame ≤ 96 px on the longer side)
+      // keeps imageSmoothingEnabled = false for that crispy retro look.
+      // High-res sheets (e.g., 256-px AI-generated art) get smoothing ON so
+      // they downscale cleanly into the fighter's ~36×60 hit box without
+      // pixel-shimmer aliasing at non-integer scales.
+      const isHiRes = sf.frameW > 96 || sf.frameH > 96;
+      ctx.imageSmoothingEnabled = isHiRes;
+      if (isHiRes) ctx.imageSmoothingQuality = 'high';
       if (this.facing === -1) {
         ctx.translate(this.cx, 0);
         ctx.scale(-1, 1);
