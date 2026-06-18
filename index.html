@@ -529,21 +529,72 @@
   // for a typical 4-row sheet of 32×48 frames — well under the 5–10MB quota
   // even with all 15 characters covered).
   const SPRITE_STORAGE_KEY = 'alphafight_sprites_v1';
-  const customSprites = {};  // key → { img, imgReady, frameW, frameH, frames: {idle, run, jump, attack}, fps, imgUrl }
+  const customSprites = {};  // key → see two shapes below
   const SPRITE_DEFAULTS = { frameW: 32, frameH: 48, frames: { idle: 4, run: 6, jump: 2, attack: 3 }, fps: 8 };
 
+  // ---- Built-in sprite bundles (ship with the game, loaded from /sprites) ----
+  // Multi-animation format produced by autosprite: one PNG per animation, each
+  // a uniform grid of frames. Maps fighter state → animation:
+  //   idle (onGround, vx ≈ 0)        → idle
+  //   walk (onGround, |vx| ∈ 0.5..3) → walk
+  //   run  (onGround, |vx| > 3)      → run
+  //   jump (!onGround)               → jump
+  //   attack (attackCooldown > 0)    → attack
+  //   hit (hitstun > 0)              → hit (preempts everything)
+  const BUILTIN_SPRITES = {
+    nico: {
+      multi: true,
+      animations: {
+        idle:   { url: 'sprites/nico/idle.png',   cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 12 },
+        walk:   { url: 'sprites/nico/walk.png',   cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 24 },
+        run:    { url: 'sprites/nico/run.png',    cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 30 },
+        jump:   { url: 'sprites/nico/jump.png',   cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 24 },
+        attack: { url: 'sprites/nico/attack.png', cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 60 },
+        hit:    { url: 'sprites/nico/hit.png',    cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 60 },
+      },
+    },
+  };
+
   function loadCustomSprites() {
+    // Built-ins first — they ship with the game and don't touch localStorage.
+    for (const key of Object.keys(BUILTIN_SPRITES)) {
+      installMultiAnimationSprite(key, BUILTIN_SPRITES[key]);
+    }
     try {
       const raw = localStorage.getItem(SPRITE_STORAGE_KEY);
       if (!raw) return;
       const data = JSON.parse(raw);
       for (const k of Object.keys(data)) {
         if (!CHAR_KEYS.includes(k)) continue;
+        // User uploads override built-ins.
         installCustomSprite(k, data[k]);
       }
     } catch (e) {
       console.warn('Failed to load custom sprites:', e);
     }
+  }
+
+  // Multi-animation sprite installer. Each animation has its own Image() that
+  // sets imgReady when loaded; tryDrawSpriteSheet picks the right one per frame.
+  function installMultiAnimationSprite(key, def) {
+    const entry = { multi: true, animations: {} };
+    for (const animName of Object.keys(def.animations)) {
+      const a = def.animations[animName];
+      const img = new Image();
+      const slot = {
+        img, imgReady: false,
+        url: a.url,
+        cols: a.cols, rows: a.rows,
+        frameCount: a.frameCount,
+        frameW: a.frameW, frameH: a.frameH,
+        fps: a.fps,
+      };
+      img.onload = () => { slot.imgReady = true; };
+      img.onerror = () => { console.warn('Sprite anim failed to decode:', key, animName, a.url); };
+      img.src = a.url;
+      entry.animations[animName] = slot;
+    }
+    customSprites[key] = entry;
   }
 
   function installCustomSprite(key, meta) {
@@ -578,11 +629,15 @@
     delete customSprites[key];
     try {
       const raw = localStorage.getItem(SPRITE_STORAGE_KEY);
-      if (!raw) return;
-      const data = JSON.parse(raw);
-      delete data[key];
-      localStorage.setItem(SPRITE_STORAGE_KEY, JSON.stringify(data));
+      if (raw) {
+        const data = JSON.parse(raw);
+        delete data[key];
+        localStorage.setItem(SPRITE_STORAGE_KEY, JSON.stringify(data));
+      }
     } catch (e) {}
+    // Re-install built-in if there is one — clearing only removes user
+    // overrides, never the shipped multi-animation bundle.
+    if (BUILTIN_SPRITES[key]) installMultiAnimationSprite(key, BUILTIN_SPRITES[key]);
   }
 
   // ---------- SPRITE MANAGER (HTML OVERLAY) ----------
@@ -614,9 +669,14 @@
     grid.innerHTML = '';
     for (const key of CHAR_KEYS) {
       const card = document.createElement('div');
-      card.className = 'card' + (customSprites[key] ? ' has' : '');
+      const installed = customSprites[key];
+      const isBuiltIn = installed && installed.multi && !!BUILTIN_SPRITES[key];
+      card.className = 'card' + (installed ? ' has' : '');
+      const status = isBuiltIn ? 'BUILT-IN (autosprite, 6 animations)'
+                  : installed ? 'sprite uploaded'
+                  : 'procedural (default)';
       card.innerHTML = `<div class="name">${(CHARS[key] && CHARS[key].name || key).toUpperCase()}</div>
-                        <div class="status">${customSprites[key] ? 'sprite uploaded' : 'procedural (default)'}</div>`;
+                        <div class="status">${status}</div>`;
       card.addEventListener('click', () => openSpriteEditor(key));
       grid.appendChild(card);
     }
@@ -4704,13 +4764,83 @@
       drawLimb(this.cx + fwd * shDX, shY, ftx, ftY, upper, fore, fbend, 5, armColor, handColor, 3);
     }
 
-    // Pick one of {idle, run, jump, attack} based on fighter state. Used as
-    // the row selector for user-uploaded sprite sheets.
-    animState() {
+    // Pick a state name for sprite-sheet row selection. Multi-animation
+    // sheets (autosprite output) get the finer set {idle, walk, run, jump,
+    // attack, hit}; legacy single-sheet uploads only get the coarse 4.
+    animState(extended) {
+      if (extended && this.hitstun > 0) return 'hit';
       if (!this.onGround) return 'jump';
       if (this.attackCooldown > 0 || (this.moveState && /attack|jab|punch|kick|slash|swing|stab|throw|spike|smash/i.test(this.moveState.type))) return 'attack';
-      if (Math.abs(this.vx) > 0.5) return 'run';
-      return 'idle';
+      const speed = Math.abs(this.vx);
+      if (extended) {
+        if (speed > 3.0) return 'run';
+        if (speed > 0.5) return 'walk';
+        return 'idle';
+      }
+      return speed > 0.5 ? 'run' : 'idle';
+    }
+
+    // Multi-animation (autosprite) variant: pick the right per-state PNG,
+    // index a frame on a wall-clock timeline (state-relative), draw at the
+    // body box. Frames are laid out left-to-right, top-to-bottom in a
+    // cols×rows grid (autosprite's default).
+    tryDrawMultiAnimSprite(ctx, bodyX, bodyY, bodyW, bodyH, sf) {
+      let state = this.animState(true);
+      let anim = sf.animations[state];
+      // Fall back through a sensible chain if a particular animation wasn't
+      // uploaded for this character.
+      if (!anim || !anim.imgReady) {
+        const fallbackChain = { hit: 'attack', attack: 'idle', run: 'walk', walk: 'idle', jump: 'idle' };
+        let s = state;
+        while (fallbackChain[s]) {
+          s = fallbackChain[s];
+          anim = sf.animations[s];
+          if (anim && anim.imgReady) break;
+        }
+      }
+      if (!anim || !anim.imgReady) {
+        anim = sf.animations.idle;
+        if (!anim || !anim.imgReady) return false;
+      }
+      // Reset the frame counter whenever the animation state changes so each
+      // animation plays from frame 0 (attacks/hits feel snappy this way).
+      if (this._lastAnimState !== state) {
+        this._lastAnimState = state;
+        this._animStartTick = this.animTick;
+      }
+      const elapsed = this.animTick - (this._animStartTick || 0);
+      const frameIdx = Math.floor(elapsed * anim.fps / 60) % Math.max(1, anim.frameCount);
+      const col = frameIdx % anim.cols;
+      const row = Math.floor(frameIdx / anim.cols);
+      const sx = col * anim.frameW;
+      const sy = row * anim.frameH;
+      ctx.save();
+      const isHiRes = anim.frameW > 96 || anim.frameH > 96;
+      ctx.imageSmoothingEnabled = isHiRes;
+      if (isHiRes) ctx.imageSmoothingQuality = 'high';
+      // Autosprite frames are 256×256 with the character centered. Calibrated
+      // against Nico's six animations: the visible character occupies ~60% of
+      // the frame's height and the feet sit ~78% down the frame (varies 71-88%
+      // by animation; jump apex pulls the feet highest, attack flares lower).
+      // Scale: map the source character's height to the fighter's hit-box
+      // height so weapons + flame tuft retain their margin.
+      const SRC_BODY_FRAC = 0.60;
+      const SRC_FEET_FRAC = 0.78;
+      const bodyScale = bodyH / (anim.frameH * SRC_BODY_FRAC);
+      const drawW = anim.frameW * bodyScale;
+      const drawH = anim.frameH * bodyScale;
+      const dx = (bodyX + bodyW / 2) - drawW / 2;
+      const dy = (bodyY + bodyH) - drawH * SRC_FEET_FRAC;
+      if (this.facing === -1) {
+        ctx.translate(this.cx, 0);
+        ctx.scale(-1, 1);
+        ctx.translate(-this.cx, 0);
+      }
+      try {
+        ctx.drawImage(anim.img, sx, sy, anim.frameW, anim.frameH, dx, dy, drawW, drawH);
+      } catch (e) { ctx.restore(); return false; }
+      ctx.restore();
+      return true;
     }
 
     // If a sprite sheet is uploaded for this character, draw the current
@@ -4718,7 +4848,9 @@
     // return true (caller skips procedural). Returns false otherwise.
     tryDrawSpriteSheet(ctx, bodyX, bodyY, bodyW, bodyH) {
       const sf = customSprites[this.key];
-      if (!sf || !sf.imgReady) return false;
+      if (!sf) return false;
+      if (sf.multi) return this.tryDrawMultiAnimSprite(ctx, bodyX, bodyY, bodyW, bodyH, sf);
+      if (!sf.imgReady) return false;
       let state = this.animState();
       let frames = sf.frames[state] || 0;
       if (frames <= 0) { state = 'idle'; frames = sf.frames.idle || 1; }
@@ -4937,7 +5069,15 @@
       const bodyY = this.y + (this.h - bodyH) + bobY;
 
       // === Character flair drawn BEHIND body ===
-      this.drawCharacterFlairBehind(ctx);
+      // Multi-animation autosprite sheets bake the character's flair (flame
+      // tuft, scarf, weapon, etc.) into the source frames. Suppress the
+      // procedural flair when such a sheet is installed AND at least one of
+      // its animations has finished loading — that way we don't strip Nico's
+      // flame during the brief PNG-decode window where the sprite path
+      // would still fall through to the procedural body.
+      const sprite = customSprites[this.key];
+      const spriteIncludesFlair = sprite && sprite.multi && Object.values(sprite.animations).some(a => a.imgReady);
+      if (!spriteIncludesFlair) this.drawCharacterFlairBehind(ctx);
 
       // Apply lean transform around the foot anchor (so feet stay planted).
       // Always applied so the skeletal limbs share the body's exact coordinate
@@ -4994,7 +5134,9 @@
       ctx.restore();
 
       // === Character flair drawn IN FRONT of body ===
-      this.drawCharacterFlairFront(ctx, bodyX, bodyY, bodyW, bodyH);
+      // Same suppression as the BEHIND pass — autosprite frames bake their
+      // own flair.
+      if (!spriteIncludesFlair) this.drawCharacterFlairFront(ctx, bodyX, bodyY, bodyW, bodyH);
 
       // Player indicator (arrow above head) — never transformed
       ctx.fillStyle = this.index === 0 ? '#ff6a2a' : '#4ab8ff';
