@@ -7,6 +7,34 @@
   .key { display: inline-block; background: #2a2a3a; padding: 2px 6px; border-radius: 3px; color: #fff; font-family: monospace; font-size: 11px; }
   h1 { font-size: 20px; margin-bottom: 8px; letter-spacing: 2px; color: #ff6a2a; }
   h1 span { color: #4ab8ff; }
+
+  /* ---- Sprite manager overlay ---- */
+  #spriteMgr { position: fixed; inset: 0; background: rgba(8, 8, 16, 0.92); z-index: 9999; display: none; overflow-y: auto; padding: 24px; }
+  #spriteMgr.open { display: block; }
+  #spriteMgr .panel { max-width: 980px; margin: 0 auto; background: #15152a; border: 2px solid #3a3a55; border-radius: 10px; padding: 24px; }
+  #spriteMgr h2 { color: #4ab8ff; margin-bottom: 6px; letter-spacing: 1px; }
+  #spriteMgr .lead { color: #aaa; font-size: 13px; margin-bottom: 18px; line-height: 1.5; }
+  #spriteMgr .grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; margin-bottom: 22px; }
+  #spriteMgr .card { background: #1f1f3a; border: 2px solid #333; border-radius: 8px; padding: 12px; cursor: pointer; transition: border 0.15s; }
+  #spriteMgr .card:hover { border-color: #4ab8ff; }
+  #spriteMgr .card.has { border-color: #5aaf3a; }
+  #spriteMgr .card .name { color: #fff; font-weight: bold; margin-bottom: 6px; }
+  #spriteMgr .card .status { color: #888; font-size: 11px; }
+  #spriteMgr .card.has .status { color: #5aaf3a; }
+  #spriteMgr .editor { display: none; background: #1f1f3a; border: 2px solid #4ab8ff; border-radius: 8px; padding: 16px; }
+  #spriteMgr .editor.open { display: block; }
+  #spriteMgr .editor h3 { color: #ffeb3b; margin-bottom: 10px; }
+  #spriteMgr .editor .row { display: flex; gap: 16px; flex-wrap: wrap; align-items: center; margin: 8px 0; }
+  #spriteMgr .editor label { color: #ccc; font-size: 12px; display: inline-flex; align-items: center; gap: 6px; }
+  #spriteMgr .editor input[type=number] { width: 64px; background: #0a0a16; color: #fff; border: 1px solid #444; padding: 4px 6px; border-radius: 4px; }
+  #spriteMgr .editor input[type=file] { color: #ccc; font-size: 12px; }
+  #spriteMgr .editor .preview { background: #0a0a16; padding: 10px; border-radius: 6px; margin: 10px 0; image-rendering: pixelated; }
+  #spriteMgr .editor canvas { image-rendering: pixelated; image-rendering: crisp-edges; background: #0a0a16; display: block; }
+  #spriteMgr button { background: #4ab8ff; color: #0a0a12; border: none; padding: 8px 16px; border-radius: 5px; font-weight: bold; cursor: pointer; margin-right: 8px; font-size: 13px; }
+  #spriteMgr button.danger { background: #ff4444; color: #fff; }
+  #spriteMgr button.ghost { background: #333; color: #fff; }
+  #spriteMgr button:hover { filter: brightness(1.1); }
+  #spriteMgr .hint { color: #888; font-size: 11px; font-style: italic; margin: 8px 0; }
 </style>
 
 <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
@@ -18,6 +46,53 @@
     <b style="color:#ff6a2a">P1</b>: <span class="key">WASD</span> move/jump &nbsp; <span class="key">L-Shift</span> block &nbsp; <span class="key">F</span> attack (+direction for tilts/aerials) &nbsp; <span class="key">G</span> special (+direction)<br>
     <b style="color:#4ab8ff">P2</b>: <span class="key">Arrows</span> move/jump &nbsp; <span class="key">R-Shift</span> block &nbsp; <span class="key">.</span> attack (+direction) &nbsp; <span class="key">/</span> special (+direction)<br>
     Character select on title screen. Press <span class="key">Enter</span> to start / restart. First to knock the other off 3 times wins.
+  </div>
+</div>
+
+<!-- Sprite manager overlay — opened from the SPRITES menu entry. Lets users
+     upload per-character pixel sprite sheets that replace the procedural body. -->
+<div id="spriteMgr">
+  <div class="panel">
+    <h2>PIXEL SPRITES</h2>
+    <p class="lead">
+      Upload a sprite sheet per character. Sheets should be a vertical stack of
+      4 rows of frames — top to bottom: <b>idle</b>, <b>run</b>, <b>jump</b>,
+      <b>attack</b>. Pixel-art crisp rendering is applied automatically.
+      Sprites are saved in your browser (localStorage) and persist between
+      sessions. Press <span class="key">ESC</span> or click CLOSE to return.
+    </p>
+    <div id="spriteGrid" class="grid"></div>
+    <div id="spriteEditor" class="editor">
+      <h3 id="spriteEditorTitle">EDITING</h3>
+      <div class="row">
+        <label>PNG sheet: <input type="file" id="spriteFile" accept="image/png,image/*"></label>
+      </div>
+      <div class="row">
+        <label>Frame width <input type="number" id="spriteFrameW" min="1" max="1024" value="32"></label>
+        <label>Frame height <input type="number" id="spriteFrameH" min="1" max="1024" value="48"></label>
+        <label>FPS <input type="number" id="spriteFps" min="1" max="60" value="8"></label>
+      </div>
+      <div class="row">
+        <label>Idle frames <input type="number" id="spriteFramesIdle" min="0" max="32" value="4"></label>
+        <label>Run frames <input type="number" id="spriteFramesRun" min="0" max="32" value="6"></label>
+        <label>Jump frames <input type="number" id="spriteFramesJump" min="0" max="32" value="2"></label>
+        <label>Attack frames <input type="number" id="spriteFramesAttack" min="0" max="32" value="3"></label>
+      </div>
+      <p class="hint">Set frames to 0 to fall back to the idle row for that state. Frame sizes &gt; 96 px enable smoothed downscaling for AI-generated hi-res art; smaller sizes keep the crisp pixel-art look.</p>
+      <div class="preview">
+        <canvas id="spritePreview" width="320" height="240"></canvas>
+      </div>
+      <div class="row">
+        <button id="spriteSaveBtn">SAVE</button>
+        <button id="spriteGenBtn">GENERATE FROM PROCEDURAL</button>
+        <button id="spriteDlBtn" class="ghost">DOWNLOAD PNG</button>
+        <button id="spriteClearBtn" class="danger">CLEAR SPRITE</button>
+        <button id="spriteCancelBtn" class="ghost">CANCEL</button>
+      </div>
+    </div>
+    <div class="row" style="margin-top: 18px;">
+      <button id="spriteCloseBtn" class="ghost">CLOSE</button>
+    </div>
   </div>
 </div>
 
@@ -34,7 +109,17 @@
   // firing between two sim frames) would be missed because keys[code] reads false
   // by the time the next frame runs. Symptom: specials sometimes don't fire.
   const keyPressLatch = {};
+  // When the user is focused inside an input/textarea (e.g., typing a number
+  // into the sprite manager), don't capture the keystroke into the game's
+  // input map — they're typing UI text, not playing the game.
+  function isTypingInForm(e) {
+    const t = e.target;
+    if (!t) return false;
+    const tag = (t.tagName || '').toUpperCase();
+    return tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT' || t.isContentEditable;
+  }
   window.addEventListener('keydown', e => {
+    if (isTypingInForm(e)) return;
     keys[e.code] = true;
     keyPressLatch[e.code] = true;
     // Lazy-init audio on first user gesture (browser autoplay policy)
@@ -45,7 +130,7 @@
     }
     if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
   });
-  window.addEventListener('keyup', e => { keys[e.code] = false; });
+  window.addEventListener('keyup', e => { if (!isTypingInForm(e)) keys[e.code] = false; });
   function isHeld(code) { return !!(keys[code] || keyPressLatch[code]); }
   function consumeKeyLatch() { for (const k in keyPressLatch) delete keyPressLatch[k]; }
 
@@ -196,13 +281,23 @@
   };
   function updateCamera() {
     if (fighters.length < 2) return;
-    // Midpoint of the two fighters
-    const cx = (fighters[0].cx + fighters[1].cx) / 2;
-    const cy = (fighters[0].cy + fighters[1].cy) / 2;
-    // Zoom based on distance between fighters — pull back if they're far apart
-    const dx = Math.abs(fighters[0].cx - fighters[1].cx);
-    const dy = Math.abs(fighters[0].cy - fighters[1].cy);
-    // Keep both fighters on screen with some margin
+    // Bounding box of every alive fighter (generalized from the old 2-player
+    // midpoint so 3- and 4-player matches frame everyone).
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, n = 0;
+    for (const f of fighters) {
+      if (f.stocks <= 0 || f.respawnTimer > 0) continue;
+      if (f.cx < minX) minX = f.cx;
+      if (f.cx > maxX) maxX = f.cx;
+      if (f.cy < minY) minY = f.cy;
+      if (f.cy > maxY) maxY = f.cy;
+      n++;
+    }
+    if (n === 0) return;                       // no one to frame (between respawns) — hold
+    const cx = (minX + maxX) / 2;
+    const cy = (minY + maxY) / 2;
+    const dx = maxX - minX;
+    const dy = maxY - minY;
+    // Keep all fighters on screen with some margin
     const marginX = 280, marginY = 200;
     const zx = W / (dx + marginX * 2);
     const zy = H / (dy + marginY * 2);
@@ -416,11 +511,461 @@
   };
   const CHAR_KEYS = ['nico', 'derek', 'rhys', 'greyson', 'kele', 'jonah', 'theo', 'cole', 'angus', 'aidan', 'liam', 'colton', 'donny', 'drew', 'whitney'];
 
+  // ---------- USER-UPLOADED PIXEL SPRITES ----------
+  // Per-character sprite sheets uploaded by the user. When a sheet is present
+  // for a character, Fighter.render() draws the appropriate animation frame
+  // (idle/run/jump/attack) from the sheet instead of the procedural body+head
+  // +arms+legs. All other overlays (status flashes, counter ring, character
+  // flair like weapons, shield, etc.) still render on top of the sprite.
+  //
+  // Sheet layout convention: 4 horizontal rows, top to bottom
+  //   row 0: idle frames
+  //   row 1: run frames
+  //   row 2: jump frames
+  //   row 3: attack frames
+  // Frame counts per row are configurable; missing rows fall back to idle.
+  //
+  // Persisted as JSON in localStorage. PNGs stored as data URLs (~50KB each
+  // for a typical 4-row sheet of 32×48 frames — well under the 5–10MB quota
+  // even with all 15 characters covered).
+  const SPRITE_STORAGE_KEY = 'alphafight_sprites_v1';
+  const customSprites = {};  // key → see two shapes below
+  const SPRITE_DEFAULTS = { frameW: 32, frameH: 48, frames: { idle: 4, run: 6, jump: 2, attack: 3 }, fps: 8 };
+
+  // ---- Built-in sprite bundles (ship with the game, loaded from /sprites) ----
+  // Multi-animation format produced by autosprite: one PNG per animation, each
+  // a uniform grid of frames. Maps fighter state → animation:
+  //   idle (onGround, vx ≈ 0)        → idle
+  //   walk (onGround, |vx| ∈ 0.5..3) → walk
+  //   run  (onGround, |vx| > 3)      → run
+  //   jump (!onGround)               → jump
+  //   attack (attackCooldown > 0)    → attack
+  //   hit (hitstun > 0)              → hit (preempts everything)
+  const BUILTIN_SPRITES = {
+    nico: {
+      multi: true,
+      animations: {
+        idle:   { url: 'sprites/nico/idle.png',   cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 12 },
+        walk:   { url: 'sprites/nico/walk.png',   cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 24 },
+        run:    { url: 'sprites/nico/run.png',    cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 30 },
+        jump:   { url: 'sprites/nico/jump.png',   cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 24 },
+        attack: { url: 'sprites/nico/attack.png', cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 60 },
+        hit:    { url: 'sprites/nico/hit.png',    cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 60 },
+      },
+    },
+  };
+
+  function loadCustomSprites() {
+    // Built-ins first — they ship with the game and don't touch localStorage.
+    for (const key of Object.keys(BUILTIN_SPRITES)) {
+      installMultiAnimationSprite(key, BUILTIN_SPRITES[key]);
+    }
+    try {
+      const raw = localStorage.getItem(SPRITE_STORAGE_KEY);
+      if (!raw) return;
+      const data = JSON.parse(raw);
+      for (const k of Object.keys(data)) {
+        if (!CHAR_KEYS.includes(k)) continue;
+        // User uploads override built-ins.
+        installCustomSprite(k, data[k]);
+      }
+    } catch (e) {
+      console.warn('Failed to load custom sprites:', e);
+    }
+  }
+
+  // Multi-animation sprite installer. Each animation has its own Image() that
+  // sets imgReady when loaded; tryDrawSpriteSheet picks the right one per frame.
+  function installMultiAnimationSprite(key, def) {
+    const entry = { multi: true, animations: {} };
+    for (const animName of Object.keys(def.animations)) {
+      const a = def.animations[animName];
+      const img = new Image();
+      const slot = {
+        img, imgReady: false,
+        url: a.url,
+        cols: a.cols, rows: a.rows,
+        frameCount: a.frameCount,
+        frameW: a.frameW, frameH: a.frameH,
+        fps: a.fps,
+      };
+      img.onload = () => { slot.imgReady = true; };
+      img.onerror = () => { console.warn('Sprite anim failed to decode:', key, animName, a.url); };
+      img.src = a.url;
+      entry.animations[animName] = slot;
+    }
+    customSprites[key] = entry;
+  }
+
+  function installCustomSprite(key, meta) {
+    const img = new Image();
+    const entry = {
+      img, imgReady: false,
+      frameW: meta.frameW || SPRITE_DEFAULTS.frameW,
+      frameH: meta.frameH || SPRITE_DEFAULTS.frameH,
+      frames: Object.assign({}, SPRITE_DEFAULTS.frames, meta.frames || {}),
+      fps: meta.fps || SPRITE_DEFAULTS.fps,
+      imgUrl: meta.imgUrl,
+    };
+    img.onload = () => { entry.imgReady = true; };
+    img.onerror = () => { console.warn('Sprite failed to decode for', key); };
+    img.src = meta.imgUrl;
+    customSprites[key] = entry;
+  }
+
+  function saveCustomSprite(key, meta) {
+    installCustomSprite(key, meta);
+    try {
+      const raw = localStorage.getItem(SPRITE_STORAGE_KEY);
+      const data = raw ? JSON.parse(raw) : {};
+      data[key] = meta;
+      localStorage.setItem(SPRITE_STORAGE_KEY, JSON.stringify(data));
+    } catch (e) {
+      console.warn('Failed to persist sprite:', e);
+    }
+  }
+
+  function clearCustomSprite(key) {
+    delete customSprites[key];
+    try {
+      const raw = localStorage.getItem(SPRITE_STORAGE_KEY);
+      if (raw) {
+        const data = JSON.parse(raw);
+        delete data[key];
+        localStorage.setItem(SPRITE_STORAGE_KEY, JSON.stringify(data));
+      }
+    } catch (e) {}
+    // Re-install built-in if there is one — clearing only removes user
+    // overrides, never the shipped multi-animation bundle.
+    if (BUILTIN_SPRITES[key]) installMultiAnimationSprite(key, BUILTIN_SPRITES[key]);
+  }
+
+  // ---------- SPRITE MANAGER (HTML OVERLAY) ----------
+  // Editor state — which character is currently being edited. The DOM
+  // overlay was injected at page top; here we wire up its event handlers
+  // and the preview-animation render loop.
+  let spriteEditingKey = null;
+  let spritePreviewAnim = null;            // { img, frameW, frameH, frames, fps, raf }
+  let spritePreviewTick = 0;
+  let spritePreviewPendingUrl = null;       // newly-uploaded url not yet saved
+
+  function openSpriteManager() {
+    const mgr = document.getElementById('spriteMgr');
+    if (!mgr) return;
+    rebuildSpriteGrid();
+    closeSpriteEditor();
+    mgr.classList.add('open');
+  }
+
+  function closeSpriteManager() {
+    const mgr = document.getElementById('spriteMgr');
+    if (mgr) mgr.classList.remove('open');
+    stopSpritePreview();
+  }
+
+  function rebuildSpriteGrid() {
+    const grid = document.getElementById('spriteGrid');
+    if (!grid) return;
+    grid.innerHTML = '';
+    for (const key of CHAR_KEYS) {
+      const card = document.createElement('div');
+      const installed = customSprites[key];
+      const isBuiltIn = installed && installed.multi && !!BUILTIN_SPRITES[key];
+      card.className = 'card' + (installed ? ' has' : '');
+      const status = isBuiltIn ? 'BUILT-IN (autosprite, 6 animations)'
+                  : installed ? 'sprite uploaded'
+                  : 'procedural (default)';
+      card.innerHTML = `<div class="name">${(CHARS[key] && CHARS[key].name || key).toUpperCase()}</div>
+                        <div class="status">${status}</div>`;
+      card.addEventListener('click', () => openSpriteEditor(key));
+      grid.appendChild(card);
+    }
+  }
+
+  function openSpriteEditor(key) {
+    spriteEditingKey = key;
+    spritePreviewPendingUrl = null;
+    const ed = document.getElementById('spriteEditor');
+    document.getElementById('spriteEditorTitle').textContent = 'EDITING — ' + ((CHARS[key] && CHARS[key].name) || key).toUpperCase();
+    // Pre-fill with existing values if already uploaded, else defaults.
+    const existing = customSprites[key];
+    const src = existing || SPRITE_DEFAULTS;
+    document.getElementById('spriteFrameW').value = src.frameW || SPRITE_DEFAULTS.frameW;
+    document.getElementById('spriteFrameH').value = src.frameH || SPRITE_DEFAULTS.frameH;
+    document.getElementById('spriteFps').value = src.fps || SPRITE_DEFAULTS.fps;
+    const fr = src.frames || SPRITE_DEFAULTS.frames;
+    document.getElementById('spriteFramesIdle').value = fr.idle;
+    document.getElementById('spriteFramesRun').value = fr.run;
+    document.getElementById('spriteFramesJump').value = fr.jump;
+    document.getElementById('spriteFramesAttack').value = fr.attack;
+    document.getElementById('spriteFile').value = '';
+    ed.classList.add('open');
+    startSpritePreview();
+  }
+
+  function closeSpriteEditor() {
+    const ed = document.getElementById('spriteEditor');
+    if (ed) ed.classList.remove('open');
+    spriteEditingKey = null;
+    stopSpritePreview();
+  }
+
+  function currentEditorMeta() {
+    const url = spritePreviewPendingUrl
+             || (customSprites[spriteEditingKey] && customSprites[spriteEditingKey].imgUrl);
+    if (!url) return null;
+    return {
+      imgUrl: url,
+      frameW: parseInt(document.getElementById('spriteFrameW').value, 10) || SPRITE_DEFAULTS.frameW,
+      frameH: parseInt(document.getElementById('spriteFrameH').value, 10) || SPRITE_DEFAULTS.frameH,
+      fps:    parseInt(document.getElementById('spriteFps').value, 10) || SPRITE_DEFAULTS.fps,
+      frames: {
+        idle:   parseInt(document.getElementById('spriteFramesIdle').value, 10) || 0,
+        run:    parseInt(document.getElementById('spriteFramesRun').value, 10) || 0,
+        jump:   parseInt(document.getElementById('spriteFramesJump').value, 10) || 0,
+        attack: parseInt(document.getElementById('spriteFramesAttack').value, 10) || 0,
+      },
+    };
+  }
+
+  // Animated preview: cycles through idle → run → jump → attack rows on a
+  // 1-second-per-state rotation so the user can verify every animation.
+  function startSpritePreview() {
+    stopSpritePreview();
+    const canvas = document.getElementById('spritePreview');
+    if (!canvas) return;
+    const pctx = canvas.getContext('2d');
+    pctx.imageSmoothingEnabled = false;
+    spritePreviewAnim = { img: null, raf: 0 };
+    const loadFromUrl = (url) => {
+      if (!url) return;
+      const img = new Image();
+      img.onload = () => { spritePreviewAnim.img = img; };
+      img.src = url;
+    };
+    const existingUrl = customSprites[spriteEditingKey] && customSprites[spriteEditingKey].imgUrl;
+    if (existingUrl) loadFromUrl(existingUrl);
+    spritePreviewTick = 0;
+    const ROWS = ['idle', 'run', 'jump', 'attack'];
+    function frame() {
+      spritePreviewTick++;
+      pctx.fillStyle = '#0a0a16';
+      pctx.fillRect(0, 0, canvas.width, canvas.height);
+      const meta = currentEditorMeta();
+      if (spritePreviewPendingUrl && (!spritePreviewAnim.img || spritePreviewAnim.img.src !== spritePreviewPendingUrl)) {
+        loadFromUrl(spritePreviewPendingUrl);
+      }
+      const img = spritePreviewAnim.img;
+      if (img && meta) {
+        const stateIdx = Math.floor(spritePreviewTick / 60) % 4;
+        const state = ROWS[stateIdx];
+        const frames = meta.frames[state] || meta.frames.idle || 1;
+        const row = state === 'idle' ? 0 : state === 'run' ? 1 : state === 'jump' ? 2 : 3;
+        const af = Math.floor(spritePreviewTick * meta.fps / 60) % Math.max(1, frames);
+        const sx = af * meta.frameW;
+        const sy = row * meta.frameH;
+        // Fit-to-preview scale. Up to 4× for tiny pixel-art frames, down to
+        // <1× for large frames (e.g., 256-px high-res sheets) so they never
+        // overflow the 320×240 preview canvas.
+        const previewPad = 28;
+        const maxScale = Math.min((canvas.width - 20) / meta.frameW,
+                                  (canvas.height - previewPad) / meta.frameH);
+        const scale = Math.max(0.25, Math.min(4, maxScale));
+        // For non-integer down-scales, enable smoothing so big sheets shrink
+        // cleanly. Integer up-scales keep smoothing off for crisp pixel art.
+        pctx.imageSmoothingEnabled = (scale < 1);
+        const dw = meta.frameW * scale;
+        const dh = meta.frameH * scale;
+        const dx = (canvas.width - dw) / 2;
+        const dy = (canvas.height - dh) / 2;
+        try { pctx.drawImage(img, sx, sy, meta.frameW, meta.frameH, dx, dy, dw, dh); } catch (e) {}
+        pctx.fillStyle = '#aaa';
+        pctx.font = '11px monospace';
+        pctx.fillText(state.toUpperCase() + ' · frame ' + (af + 1) + '/' + Math.max(1, frames), 10, 18);
+      } else {
+        pctx.fillStyle = '#666';
+        pctx.font = '12px sans-serif';
+        pctx.fillText('No sprite yet — pick a PNG above.', 10, 30);
+      }
+      spritePreviewAnim.raf = requestAnimationFrame(frame);
+    }
+    spritePreviewAnim.raf = requestAnimationFrame(frame);
+  }
+
+  function stopSpritePreview() {
+    if (spritePreviewAnim && spritePreviewAnim.raf) cancelAnimationFrame(spritePreviewAnim.raf);
+    spritePreviewAnim = null;
+  }
+
+  // Drive the Fighter through a set of poses and stamp each frame into a
+  // sprite sheet using the game's own procedural draw code. The resulting
+  // PNG matches the in-battle look of the character exactly (flame tuft,
+  // scarf, weapon, etc.), and is a great starting point to refine in
+  // autosprite/Aseprite or to use as-is.
+  function generateProceduralSpriteSheet(key, frameW, frameH, counts) {
+    const cols = Math.max(counts.idle | 0, counts.run | 0, counts.jump | 0, counts.attack | 0, 1);
+    const sheet = document.createElement('canvas');
+    sheet.width = cols * frameW;
+    sheet.height = 4 * frameH;
+    const sctx = sheet.getContext('2d');
+    sctx.imageSmoothingEnabled = false;
+    sctx.clearRect(0, 0, sheet.width, sheet.height);
+
+    // Stub fighter — temporarily uninstall any uploaded sprite for this
+    // character so render() falls through to the procedural pipeline.
+    const wasInstalled = customSprites[key];
+    delete customSprites[key];
+    const f = new Fighter(key, 100, 1, 0);
+    const FAKE_GROUND_Y = 200;
+
+    // Pose presets. animTick drives every per-frame animation curve in
+    // render() (idle bob, gait cycle, hat sway, flame flicker). Setting
+    // attackCooldown > 0 re-targets the arm IK to a forward strike.
+    const presets = {
+      idle:   (fi, n) => ({ onGround: true,  vx: 0,    vy: 0,  attackCooldown: 0, animTick: (fi / n) * 78 }),
+      run:    (fi, n) => ({ onGround: true,  vx: 3.6,  vy: 0,  attackCooldown: 0, animTick: 20 + (fi / n) * 60 }),
+      jump:   (fi, n) => ({ onGround: false, vx: 0.5,  vy: fi === 0 ? -10 : 5, attackCooldown: 0, animTick: 40 + fi * 12 }),
+      attack: (fi, n) => ({ onGround: true,  vx: 0,    vy: 0,  attackCooldown: Math.max(1, 24 - fi * 8), animTick: 60 + fi * 6 }),
+    };
+    const states = ['idle', 'run', 'jump', 'attack'];
+
+    for (let row = 0; row < 4; row++) {
+      const state = states[row];
+      const n = counts[state] | 0;
+      if (n <= 0) continue;
+      for (let fi = 0; fi < n; fi++) {
+        const pose = presets[state](fi, n);
+        // Reset every per-frame visual var to a clean baseline, then apply pose.
+        f.x = 100;
+        f.y = FAKE_GROUND_Y - f.h;
+        f.facing = 1;
+        f.vx = pose.vx; f.vy = pose.vy;
+        f.onGround = pose.onGround;
+        f.attackCooldown = pose.attackCooldown;
+        f.animTick = pose.animTick;
+        f.moveState = null;
+        f.hitstun = 0;
+        f.squashTimer = 0;
+        f.helpless = false;
+        f.respawnTimer = 0;
+        f.ledgeGrab = null;
+        f.counterActive = 0;
+        f.poisonTimer = 0;
+        f.shieldBroken = 0;
+        f.blocking = false;
+
+        // Render to a per-frame offscreen canvas, scaled + translated so the
+        // fighter's body box fills the frame with a small margin for hats,
+        // weapons, and flame tufts.
+        const fc = document.createElement('canvas');
+        fc.width = frameW;
+        fc.height = frameH;
+        const fctx = fc.getContext('2d');
+        fctx.imageSmoothingEnabled = false;
+        // Body box is 36w × 60h. Give a margin so flair (Liam's pole, Drew's
+        // sword, Nico's flame, headgear) stays inside the frame.
+        const TARGET_W = 48;     // logical pixels we want the body box to occupy
+        const TARGET_H = 72;
+        const scale = Math.min(frameW / TARGET_W, frameH / TARGET_H);
+        // Translate so f's center-x maps to frame's center-x and f's feet (y+h)
+        // map to ~92% down the frame (leaving ground room).
+        const groundLine = frameH - 4;
+        fctx.translate(frameW / 2 - f.cx * scale, groundLine - (f.y + f.h) * scale);
+        fctx.scale(scale, scale);
+        try { f.render(fctx); } catch (e) { console.warn('frame render failed', state, fi, e); }
+
+        sctx.drawImage(fc, fi * frameW, row * frameH);
+      }
+    }
+
+    // Restore prior installed sprite if any (we removed it above so render()
+    // wouldn't recurse into the sprite path).
+    if (wasInstalled) customSprites[key] = wasInstalled;
+
+    return sheet.toDataURL('image/png');
+  }
+
+  // Bind UI handlers once at startup. Use a small init function so we can
+  // safely run it after the DOM exists.
+  function initSpriteManagerUI() {
+    const fileIn = document.getElementById('spriteFile');
+    if (!fileIn) return;
+    fileIn.addEventListener('change', (e) => {
+      const f = e.target.files && e.target.files[0];
+      if (!f) return;
+      const reader = new FileReader();
+      reader.onload = () => { spritePreviewPendingUrl = reader.result; };
+      reader.readAsDataURL(f);
+    });
+    document.getElementById('spriteSaveBtn').addEventListener('click', () => {
+      const meta = currentEditorMeta();
+      if (!meta) { alert('Please upload a PNG first.'); return; }
+      saveCustomSprite(spriteEditingKey, meta);
+      rebuildSpriteGrid();
+      closeSpriteEditor();
+    });
+    document.getElementById('spriteClearBtn').addEventListener('click', () => {
+      if (!spriteEditingKey) return;
+      clearCustomSprite(spriteEditingKey);
+      rebuildSpriteGrid();
+      closeSpriteEditor();
+    });
+    document.getElementById('spriteCancelBtn').addEventListener('click', closeSpriteEditor);
+    document.getElementById('spriteCloseBtn').addEventListener('click', closeSpriteManager);
+    // Render the character's procedural look into a sheet, stash the result
+    // as the editor's pending PNG (preview canvas will pick it up), so the
+    // user can SAVE to install or DOWNLOAD PNG to refine elsewhere.
+    document.getElementById('spriteGenBtn').addEventListener('click', () => {
+      if (!spriteEditingKey) return;
+      const frameW = parseInt(document.getElementById('spriteFrameW').value, 10) || SPRITE_DEFAULTS.frameW;
+      const frameH = parseInt(document.getElementById('spriteFrameH').value, 10) || SPRITE_DEFAULTS.frameH;
+      const counts = {
+        idle:   parseInt(document.getElementById('spriteFramesIdle').value, 10) || 0,
+        run:    parseInt(document.getElementById('spriteFramesRun').value, 10) || 0,
+        jump:   parseInt(document.getElementById('spriteFramesJump').value, 10) || 0,
+        attack: parseInt(document.getElementById('spriteFramesAttack').value, 10) || 0,
+      };
+      try {
+        spritePreviewPendingUrl = generateProceduralSpriteSheet(spriteEditingKey, frameW, frameH, counts);
+        document.getElementById('spriteFile').value = '';
+      } catch (e) {
+        console.error(e);
+        alert('Sprite generation failed: ' + e.message);
+      }
+    });
+    document.getElementById('spriteDlBtn').addEventListener('click', () => {
+      const url = spritePreviewPendingUrl
+               || (customSprites[spriteEditingKey] && customSprites[spriteEditingKey].imgUrl);
+      if (!url) { alert('No sprite to download yet — upload or GENERATE first.'); return; }
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = (spriteEditingKey || 'sprite') + '_sheet.png';
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    });
+    // ESC closes overlay (or editor first if open).
+    window.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape' && document.getElementById('spriteMgr').classList.contains('open')) {
+        if (document.getElementById('spriteEditor').classList.contains('open')) closeSpriteEditor();
+        else closeSpriteManager();
+        e.stopPropagation();
+      }
+    });
+  }
+
   // ---------- CONTROL MAPS ----------
+  // Slots 0 + 1 use the real keyboard schemes (local 2P uses both, online uses
+  // only slot 0). Slots 2 + 3 use phantom keycodes that no real keyboard event
+  // produces, so they only ever fire when the network layer routes a remote
+  // player's input mask to that slot via applyInputBitsToFrame.
   const controls = [
     { left:'KeyA', right:'KeyD', up:'KeyW', down:'KeyS', block:'ShiftLeft', special:'KeyG', attack:'KeyF' },
     { left:'ArrowLeft', right:'ArrowRight', up:'ArrowUp', down:'ArrowDown', block:'ShiftRight', special:'Slash', attack:'Period' },
+    { left:'Slot2_left', right:'Slot2_right', up:'Slot2_up', down:'Slot2_down', block:'Slot2_block', special:'Slot2_special', attack:'Slot2_attack' },
+    { left:'Slot3_left', right:'Slot3_right', up:'Slot3_up', down:'Slot3_down', block:'Slot3_block', special:'Slot3_special', attack:'Slot3_attack' },
   ];
+  const MAX_PLAYERS = 4;
 
   // ---------- PROJECTILES & EFFECTS ----------
   const projectiles = [];
@@ -4219,6 +4764,122 @@
       drawLimb(this.cx + fwd * shDX, shY, ftx, ftY, upper, fore, fbend, 5, armColor, handColor, 3);
     }
 
+    // Pick a state name for sprite-sheet row selection. Multi-animation
+    // sheets (autosprite output) get the finer set {idle, walk, run, jump,
+    // attack, hit}; legacy single-sheet uploads only get the coarse 4.
+    animState(extended) {
+      if (extended && this.hitstun > 0) return 'hit';
+      if (!this.onGround) return 'jump';
+      if (this.attackCooldown > 0 || (this.moveState && /attack|jab|punch|kick|slash|swing|stab|throw|spike|smash/i.test(this.moveState.type))) return 'attack';
+      const speed = Math.abs(this.vx);
+      if (extended) {
+        if (speed > 3.0) return 'run';
+        if (speed > 0.5) return 'walk';
+        return 'idle';
+      }
+      return speed > 0.5 ? 'run' : 'idle';
+    }
+
+    // Multi-animation (autosprite) variant: pick the right per-state PNG,
+    // index a frame on a wall-clock timeline (state-relative), draw at the
+    // body box. Frames are laid out left-to-right, top-to-bottom in a
+    // cols×rows grid (autosprite's default).
+    tryDrawMultiAnimSprite(ctx, bodyX, bodyY, bodyW, bodyH, sf) {
+      let state = this.animState(true);
+      let anim = sf.animations[state];
+      // Fall back through a sensible chain if a particular animation wasn't
+      // uploaded for this character.
+      if (!anim || !anim.imgReady) {
+        const fallbackChain = { hit: 'attack', attack: 'idle', run: 'walk', walk: 'idle', jump: 'idle' };
+        let s = state;
+        while (fallbackChain[s]) {
+          s = fallbackChain[s];
+          anim = sf.animations[s];
+          if (anim && anim.imgReady) break;
+        }
+      }
+      if (!anim || !anim.imgReady) {
+        anim = sf.animations.idle;
+        if (!anim || !anim.imgReady) return false;
+      }
+      // Reset the frame counter whenever the animation state changes so each
+      // animation plays from frame 0 (attacks/hits feel snappy this way).
+      if (this._lastAnimState !== state) {
+        this._lastAnimState = state;
+        this._animStartTick = this.animTick;
+      }
+      const elapsed = this.animTick - (this._animStartTick || 0);
+      const frameIdx = Math.floor(elapsed * anim.fps / 60) % Math.max(1, anim.frameCount);
+      const col = frameIdx % anim.cols;
+      const row = Math.floor(frameIdx / anim.cols);
+      const sx = col * anim.frameW;
+      const sy = row * anim.frameH;
+      ctx.save();
+      const isHiRes = anim.frameW > 96 || anim.frameH > 96;
+      ctx.imageSmoothingEnabled = isHiRes;
+      if (isHiRes) ctx.imageSmoothingQuality = 'high';
+      // Autosprite frames are 256×256 with the character centered. Calibrated
+      // against Nico's six animations: the visible character occupies ~60% of
+      // the frame's height and the feet sit ~78% down the frame (varies 71-88%
+      // by animation; jump apex pulls the feet highest, attack flares lower).
+      // Scale: map the source character's height to the fighter's hit-box
+      // height so weapons + flame tuft retain their margin.
+      const SRC_BODY_FRAC = 0.60;
+      const SRC_FEET_FRAC = 0.78;
+      const bodyScale = bodyH / (anim.frameH * SRC_BODY_FRAC);
+      const drawW = anim.frameW * bodyScale;
+      const drawH = anim.frameH * bodyScale;
+      const dx = (bodyX + bodyW / 2) - drawW / 2;
+      const dy = (bodyY + bodyH) - drawH * SRC_FEET_FRAC;
+      if (this.facing === -1) {
+        ctx.translate(this.cx, 0);
+        ctx.scale(-1, 1);
+        ctx.translate(-this.cx, 0);
+      }
+      try {
+        ctx.drawImage(anim.img, sx, sy, anim.frameW, anim.frameH, dx, dy, drawW, drawH);
+      } catch (e) { ctx.restore(); return false; }
+      ctx.restore();
+      return true;
+    }
+
+    // If a sprite sheet is uploaded for this character, draw the current
+    // animation frame in place of the procedural body+head+arms+legs and
+    // return true (caller skips procedural). Returns false otherwise.
+    tryDrawSpriteSheet(ctx, bodyX, bodyY, bodyW, bodyH) {
+      const sf = customSprites[this.key];
+      if (!sf) return false;
+      if (sf.multi) return this.tryDrawMultiAnimSprite(ctx, bodyX, bodyY, bodyW, bodyH, sf);
+      if (!sf.imgReady) return false;
+      let state = this.animState();
+      let frames = sf.frames[state] || 0;
+      if (frames <= 0) { state = 'idle'; frames = sf.frames.idle || 1; }
+      const ROWS = { idle: 0, run: 1, jump: 2, attack: 3 };
+      const row = ROWS[state];
+      const animFrame = Math.floor(this.animTick * sf.fps / 60) % Math.max(1, frames);
+      const sx = animFrame * sf.frameW;
+      const sy = row * sf.frameH;
+      ctx.save();
+      // Smoothing policy: low-res pixel art (frame ≤ 96 px on the longer side)
+      // keeps imageSmoothingEnabled = false for that crispy retro look.
+      // High-res sheets (e.g., 256-px AI-generated art) get smoothing ON so
+      // they downscale cleanly into the fighter's ~36×60 hit box without
+      // pixel-shimmer aliasing at non-integer scales.
+      const isHiRes = sf.frameW > 96 || sf.frameH > 96;
+      ctx.imageSmoothingEnabled = isHiRes;
+      if (isHiRes) ctx.imageSmoothingQuality = 'high';
+      if (this.facing === -1) {
+        ctx.translate(this.cx, 0);
+        ctx.scale(-1, 1);
+        ctx.translate(-this.cx, 0);
+      }
+      try {
+        ctx.drawImage(sf.img, sx, sy, sf.frameW, sf.frameH, bodyX, bodyY, bodyW, bodyH);
+      } catch (e) { ctx.restore(); return false; }
+      ctx.restore();
+      return true;
+    }
+
     render(ctx) {
       if (this.respawnTimer > 0) return;
       const c = this.def;
@@ -4408,7 +5069,15 @@
       const bodyY = this.y + (this.h - bodyH) + bobY;
 
       // === Character flair drawn BEHIND body ===
-      this.drawCharacterFlairBehind(ctx);
+      // Multi-animation autosprite sheets bake the character's flair (flame
+      // tuft, scarf, weapon, etc.) into the source frames. Suppress the
+      // procedural flair when such a sheet is installed AND at least one of
+      // its animations has finished loading — that way we don't strip Nico's
+      // flame during the brief PNG-decode window where the sprite path
+      // would still fall through to the procedural body.
+      const sprite = customSprites[this.key];
+      const spriteIncludesFlair = sprite && sprite.multi && Object.values(sprite.animations).some(a => a.imgReady);
+      if (!spriteIncludesFlair) this.drawCharacterFlairBehind(ctx);
 
       // Apply lean transform around the foot anchor (so feet stay planted).
       // Always applied so the skeletal limbs share the body's exact coordinate
@@ -4419,47 +5088,55 @@
       ctx.rotate(leanRad);
       ctx.translate(-this.cx, -(this.y + this.h));
 
-      // Legs drawn BEHIND the torso (skeletal IK). The torso fill is shortened
-      // at the bottom so the lower legs + feet show beneath it.
-      this.drawLegs(ctx, bodyX, bodyY, bodyW, bodyH);
+      // User-uploaded sprite sheet completely replaces the procedural body
+      // pipeline (legs + torso + head + arms). All other rendering — counter
+      // ring, ledge hang, character flair (weapons, hats), shield, status
+      // flashes, player indicator — still draws on top.
+      if (!this.tryDrawSpriteSheet(ctx, bodyX, bodyY, bodyW, bodyH)) {
+        // Legs drawn BEHIND the torso (skeletal IK). The torso fill is shortened
+        // at the bottom so the lower legs + feet show beneath it.
+        this.drawLegs(ctx, bodyX, bodyY, bodyW, bodyH);
 
-      // Body — torso fill stops short of the foot line to reveal the legs.
-      const torsoH = bodyH - 14;
-      ctx.fillStyle = c.color;
-      ctx.fillRect(bodyX, bodyY, bodyW, torsoH);
-      // Accent stripe (proportional to body size, stays at relative 30% from top)
-      ctx.fillStyle = c.color2;
-      const stripeY = bodyY + bodyH * 0.30;
-      const stripeH = bodyH * 0.13;
-      ctx.fillRect(bodyX, stripeY, bodyW, stripeH);
+        // Body — torso fill stops short of the foot line to reveal the legs.
+        const torsoH = bodyH - 14;
+        ctx.fillStyle = c.color;
+        ctx.fillRect(bodyX, bodyY, bodyW, torsoH);
+        // Accent stripe (proportional to body size, stays at relative 30% from top)
+        ctx.fillStyle = c.color2;
+        const stripeY = bodyY + bodyH * 0.30;
+        const stripeH = bodyH * 0.13;
+        ctx.fillRect(bodyX, stripeY, bodyW, stripeH);
 
-      // Head — also gets the bob, plus a slight bob-in-place when idle
-      const headW = 20, headH = 16;
-      const headX = bodyX + (bodyW - headW) / 2;
-      const headY = bodyY + 2;
-      ctx.fillStyle = '#ffddba';
-      ctx.fillRect(headX, headY, headW, headH);
+        // Head — also gets the bob, plus a slight bob-in-place when idle
+        const headW = 20, headH = 16;
+        const headX = bodyX + (bodyW - headW) / 2;
+        const headY = bodyY + 2;
+        ctx.fillStyle = '#ffddba';
+        ctx.fillRect(headX, headY, headW, headH);
 
-      // Eye (shows facing)
-      ctx.fillStyle = '#222';
-      if (this.facing === 1) ctx.fillRect(headX + 14, headY + 6, 4, 4);
-      else ctx.fillRect(headX + 2, headY + 6, 4, 4);
+        // Eye (shows facing)
+        ctx.fillStyle = '#222';
+        if (this.facing === 1) ctx.fillRect(headX + 14, headY + 6, 4, 4);
+        else ctx.fillRect(headX + 2, headY + 6, 4, 4);
 
-      // Character emblem (initial of name)
-      ctx.fillStyle = '#000';
-      ctx.font = 'bold 10px sans-serif';
-      ctx.textAlign = 'center';
-      ctx.fillText(c.name[0], this.cx, bodyY + bodyH * 0.7);
+        // Character emblem (initial of name)
+        ctx.fillStyle = '#000';
+        ctx.font = 'bold 10px sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillText(c.name[0], this.cx, bodyY + bodyH * 0.7);
 
-      // Arms drawn IN FRONT of the torso/head (skeletal IK). During a special /
-      // attack the front hand auto-targets the action (hitbox or cast point);
-      // otherwise it follows the locomotion gait.
-      this.drawArms(ctx, bodyX, bodyY, bodyW, bodyH);
+        // Arms drawn IN FRONT of the torso/head (skeletal IK). During a special /
+        // attack the front hand auto-targets the action (hitbox or cast point);
+        // otherwise it follows the locomotion gait.
+        this.drawArms(ctx, bodyX, bodyY, bodyW, bodyH);
+      }
 
       ctx.restore();
 
       // === Character flair drawn IN FRONT of body ===
-      this.drawCharacterFlairFront(ctx, bodyX, bodyY, bodyW, bodyH);
+      // Same suppression as the BEHIND pass — autosprite frames bake their
+      // own flair.
+      if (!spriteIncludesFlair) this.drawCharacterFlairFront(ctx, bodyX, bodyY, bodyW, bodyH);
 
       // Player indicator (arrow above head) — never transformed
       ctx.fillStyle = this.index === 0 ? '#ff6a2a' : '#4ab8ff';
@@ -6612,46 +7289,77 @@
     }
   }
 
-  // ---------- NETWORK STATE ----------
-  // 'local' = shared keyboard, no networking.
-  // 'host'  = this client owns P1 (index 0); P2's inputs come from remote peer.
-  // 'guest' = this client owns P2 (index 1); P1's inputs come from remote peer.
+  // ---------- NETWORK STATE (N-player lobby, up to 4) ----------
+  //   mode = 'local' → shared keyboard, no networking.
+  //   mode = 'host'  → this client occupies slot 0; accepts up to 3 guest
+  //                    connections and RELAYS each guest's input to all other
+  //                    guests (hub-and-spoke). Owns slot assignment + seed.
+  //   mode = 'guest' → this client occupies slot 1..3; connects only to host.
+  //                    Receives a 'welcome' with our assigned slot, then sees
+  //                    full lobby state via periodic 'lobby' broadcasts.
+  //
+  // Slots: array of 4 entries (one per fighter index). Each slot is either
+  //   null (empty) or { char, ready, occupied }. Host always sets slot 0
+  //   on its own machine. Guests fill in their assigned slot when 'welcome'
+  //   arrives, then observe the other slots from 'lobby' broadcasts.
   const net = {
-    mode: 'local',          // 'local' | 'host' | 'guest'
-    localIndex: 0,          // which player index this client controls
-    peer: null,             // PeerJS Peer instance
-    conn: null,             // PeerJS DataConnection
-    roomCode: '',           // 6-char share code (host's peer id suffix)
-    connected: false,
-    everConnected: false,   // true once conn.on('open') has fired at least once
+    mode: 'local',
+    localSlot: 0,            // 0 (host) or 1..3 (guest)
+    slots: null,             // [{char, ready, occupied}, ...] of length 4
+    peer: null,              // PeerJS Peer
+    conns: {},               // host: slot index → DataConnection (1..3)
+    hostConn: null,          // guest: single connection back to host
+    roomCode: '',
+    connected: false,        // guest only — connected to host
+    everConnected: false,
     error: '',
     statusText: '',
-    inputDelay: 3,          // frames of input delay (lockstep buffer)
-    currentFrame: 0,        // logical frame counter for the active match
-    localBuf: new Map(),    // frame → input mask for local player
-    remoteBuf: new Map(),   // frame → input mask for remote player
+    inputDelay: 3,
+    currentFrame: 0,
+    localBuf: new Map(),     // frame → our local input mask
+    remoteBufs: [null, new Map(), new Map(), new Map()],  // per slot (0 is local for host)
     lastSentFrame: -1,
-    lastRecvFrame: -1,
     waitingForRemote: false,
-    hashHistory: new Map(),  // frame → 32-bit state hash for desync detection
+    hashHistory: new Map(),
     desyncFrame: -1,
+    seed: 0,
+    stage: 'classic',
   };
+
+  function emptySlots() {
+    return [null, null, null, null];
+  }
+
   function netReset() {
     net.currentFrame = 0;
     net.localBuf.clear();
-    net.remoteBuf.clear();
+    net.remoteBufs = [new Map(), new Map(), new Map(), new Map()];
     net.lastSentFrame = -1;
-    net.lastRecvFrame = -1;
     net.waitingForRemote = false;
     net.hashHistory.clear();
     net.desyncFrame = -1;
   }
 
-  // Handshake state (shared between host/guest).
-  // Both sides exchange character + seed, then transition into PLAY together.
-  let netPending = null; // { hostChar, guestChar, seed } once both filled
-  function netReadyToStart() {
-    return netPending && netPending.hostChar && netPending.guestChar && (netPending.seed != null);
+  // True once the lobby has at least 2 players and everyone occupied is ready.
+  function lobbyReadyToStart() {
+    if (!net.slots) return false;
+    let occupied = 0, ready = 0;
+    for (const s of net.slots) {
+      if (s && s.occupied) {
+        occupied++;
+        if (s.ready) ready++;
+      }
+    }
+    return occupied >= 2 && ready === occupied;
+  }
+
+  // Host: broadcast the full lobby state to every connected guest.
+  function broadcastLobby() {
+    if (net.mode !== 'host') return;
+    const payload = { t: 'lobby', slots: net.slots, stage: currentStage };
+    for (const slot in net.conns) {
+      try { net.conns[slot].send(payload); } catch (e) {}
+    }
   }
 
   function generateRoomCode() {
@@ -6662,15 +7370,22 @@
   }
 
   function netCleanup() {
-    try { net.conn && net.conn.close(); } catch (e) {}
+    try { net.hostConn && net.hostConn.close(); } catch (e) {}
+    for (const k in net.conns) {
+      try { net.conns[k].close(); } catch (e) {}
+    }
     try { net.peer && net.peer.destroy(); } catch (e) {}
-    net.conn = null;
+    net.hostConn = null;
+    net.conns = {};
     net.peer = null;
     net.connected = false;
     net.everConnected = false;
-    netPending = null;
+    net.slots = null;
   }
 
+  // --- HOST: open a room. Allocates slot 0 to ourselves, accepts up to 3 guests,
+  //     assigns them slots 1..3 in connection order. Re-broadcasts the full
+  //     lobby state to all guests whenever anything changes. ---
   function startHost(localChar) {
     if (typeof Peer === 'undefined') {
       net.error = 'PeerJS not loaded — host the file on a real URL (Netlify/Pages).';
@@ -6678,37 +7393,58 @@
     }
     netCleanup();
     net.mode = 'host';
-    net.localIndex = 0;
+    net.localSlot = 0;
+    net.seed = (Math.random() * 0x7fffffff) | 0;
+    net.slots = emptySlots();
+    net.slots[0] = { char: localChar, ready: false, occupied: true };
     net.statusText = 'creating room...';
     net.error = '';
-    const code = 'ab-' + generateRoomCode().toLowerCase(); // 'ab-' prefix to namespace
+    const code = 'ab-' + generateRoomCode().toLowerCase();
     net.roomCode = code.slice(3).toUpperCase();
-    netPending = { hostChar: localChar, guestChar: null, seed: (Math.random() * 0x7fffffff) | 0 };
     net.peer = new Peer(code);
-    net.peer.on('open', () => { net.statusText = 'waiting for guest...'; });
+    net.peer.on('open', () => { net.statusText = 'waiting for players...'; });
     net.peer.on('error', e => {
       net.error = (e && e.type) || 'peer error';
       net.statusText = 'error: ' + net.error;
     });
     net.peer.on('connection', conn => {
-      net.conn = conn;
+      // Assign first empty slot 1..3.
+      let assigned = -1;
+      for (let i = 1; i < MAX_PLAYERS; i++) {
+        if (!net.slots[i] || !net.slots[i].occupied) { assigned = i; break; }
+      }
+      if (assigned === -1) {
+        // Room full — politely send a refusal and close.
+        conn.on('open', () => {
+          try { conn.send({ t: 'full' }); } catch (e) {}
+          try { conn.close(); } catch (e) {}
+        });
+        return;
+      }
+      const slotIdx = assigned;
       conn.on('open', () => {
-        net.connected = true;
+        net.conns[slotIdx] = conn;
+        net.slots[slotIdx] = { char: CHAR_KEYS[0], ready: false, occupied: true };
         net.everConnected = true;
-        net.statusText = 'guest connected, waiting for char select...';
-        // Send our char + seed
+        net.statusText = `${Object.keys(net.conns).length+1}/4 connected`;
         try {
-          conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed, stage: currentStage });
+          conn.send({ t: 'welcome', slot: slotIdx, seed: net.seed, stage: currentStage });
         } catch (e) {}
+        broadcastLobby();
       });
-      conn.on('data', handleNetMsg);
+      conn.on('data', msg => handleNetMsg(msg, slotIdx));
       conn.on('close', () => {
-        net.connected = false;
-        net.statusText = 'guest disconnected';
+        delete net.conns[slotIdx];
+        if (net.slots) net.slots[slotIdx] = null;
+        net.statusText = `slot ${slotIdx+1} disconnected`;
+        broadcastLobby();
       });
     });
   }
 
+  // --- GUEST: connect to host. Wait for 'welcome' to learn our slot index, then
+  //     observe the lobby via 'lobby' broadcasts. Send our character / ready
+  //     state up to the host whenever they change. ---
   function startGuest(roomCode, localChar) {
     if (typeof Peer === 'undefined') {
       net.error = 'PeerJS not loaded — host the file on a real URL.';
@@ -6716,25 +7452,24 @@
     }
     netCleanup();
     net.mode = 'guest';
-    net.localIndex = 1;
+    net.localSlot = -1;                       // not assigned until 'welcome'
     net.statusText = 'connecting to ' + roomCode + '...';
     net.error = '';
     net.roomCode = roomCode;
-    netPending = { hostChar: null, guestChar: localChar, seed: null };
+    net.slots = emptySlots();
     net.peer = new Peer();
     net.peer.on('open', () => {
       const targetId = 'ab-' + roomCode.toLowerCase();
-      net.conn = net.peer.connect(targetId, { reliable: true });
-      net.conn.on('open', () => {
+      const conn = net.peer.connect(targetId, { reliable: true });
+      net.hostConn = conn;
+      conn.on('open', () => {
         net.connected = true;
         net.everConnected = true;
-        net.statusText = 'connected, sending char...';
-        try {
-          net.conn.send({ t: 'guestChar', char: netPending.guestChar });
-        } catch (e) {}
+        net.statusText = 'connected, joining lobby...';
+        try { conn.send({ t: 'pick', char: localChar }); } catch (e) {}
       });
-      net.conn.on('data', handleNetMsg);
-      net.conn.on('close', () => {
+      conn.on('data', msg => handleNetMsg(msg, 0));   // 0 = "from host"
+      conn.on('close', () => {
         net.connected = false;
         net.statusText = 'host disconnected';
       });
@@ -6745,39 +7480,63 @@
     });
   }
 
-  function handleNetMsg(msg) {
+  // fromSlot = the slot index of the peer who sent the message:
+  //   host sees messages from each guest tagged with that guest's slot;
+  //   guest sees all incoming messages tagged 0 (always from host).
+  function handleNetMsg(msg, fromSlot) {
     if (!msg || typeof msg !== 'object') return;
-    if (msg.t === 'init') {
-      // Guest receives this from host
-      netPending = netPending || { hostChar: null, guestChar: null, seed: null };
-      netPending.hostChar = msg.hostChar;
-      netPending.seed = msg.seed;
+    if (msg.t === 'welcome') {
+      // Guest receives this on initial connect.
+      net.localSlot = msg.slot;
+      net.seed = msg.seed;
       if (msg.stage && STAGES[msg.stage]) currentStage = msg.stage;
-      net.statusText = 'host: ' + msg.hostChar + ' — waiting to start';
-    } else if (msg.t === 'guestChar') {
-      // Host receives this from guest
-      netPending = netPending || { hostChar: null, guestChar: null, seed: null };
-      netPending.guestChar = msg.char;
-      net.statusText = 'guest: ' + msg.char + ' — press ENTER to start';
-    } else if (msg.t === 'startMatch') {
-      // Coordinated start signal from host. Picks up the freshly generated
-      // seed for this match (rematches use a new seed each time).
+      // Pre-fill our own slot so we render in the lobby immediately.
+      net.slots[net.localSlot] = { char: CHAR_KEYS[menuSel[0]], ready: false, occupied: true };
+      net.statusText = `joined as slot ${net.localSlot + 1}`;
+    } else if (msg.t === 'lobby') {
+      // Guest receives full lobby state from host.
+      if (msg.slots) net.slots = msg.slots;
+      if (msg.stage && STAGES[msg.stage]) currentStage = msg.stage;
+    } else if (msg.t === 'full') {
+      net.error = 'room full';
+      net.statusText = 'room full (max 4 players)';
+    } else if (msg.t === 'pick') {
+      // Host receives a character pick from a guest.
+      if (net.slots[fromSlot]) net.slots[fromSlot].char = msg.char;
+      broadcastLobby();
+    } else if (msg.t === 'ready') {
+      // Host receives a ready-toggle from a guest.
+      if (net.slots[fromSlot]) net.slots[fromSlot].ready = !!msg.ready;
+      broadcastLobby();
+    } else if (msg.t === 'start') {
+      // Coordinated start signal — host broadcasts to all guests with the slot
+      // assignments (characters) so everyone spawns the identical fighter set.
       if (net.mode === 'guest') {
-        if (msg.seed != null && netPending) netPending.seed = msg.seed;
-        if (netReadyToStart()) beginNetMatch();
+        if (msg.slots) net.slots = msg.slots;
+        if (msg.seed != null) net.seed = msg.seed;
+        beginNetMatch();
       }
     } else if (msg.t === 'input') {
-      net.remoteBuf.set(msg.frame, msg.mask);
-      if (msg.frame > net.lastRecvFrame) net.lastRecvFrame = msg.frame;
+      // Wire format: { t:'input', slot:S, frame:F, mask:M }
+      if (msg.slot != null && msg.frame != null && msg.mask != null && net.remoteBufs[msg.slot]) {
+        net.remoteBufs[msg.slot].set(msg.frame, msg.mask);
+      }
+      // Host: relay this guest's input to all OTHER guests so peers see each
+      // other's actions. (No relay if the message originated from host itself.)
+      if (net.mode === 'host' && msg.slot !== 0) {
+        const relay = { t: 'input', slot: msg.slot, frame: msg.frame, mask: msg.mask };
+        for (const otherSlot in net.conns) {
+          if (+otherSlot !== msg.slot) {
+            try { net.conns[otherSlot].send(relay); } catch (e) {}
+          }
+        }
+      }
     } else if (msg.t === 'hash') {
-      // Desync check: peer sent their state hash for some frame; compare with ours.
       const ours = net.hashHistory.get(msg.frame);
       if (ours !== undefined && ours !== msg.hash) {
         net.desyncFrame = msg.frame;
         net.statusText = 'DESYNC at frame ' + msg.frame;
       }
-    } else if (msg.t === 'pause') {
-      // Reserved for future pause/resume
     }
   }
 
@@ -6851,12 +7610,11 @@
   }
 
   function beginNetMatch() {
-    if (!netReadyToStart()) return;
-    // Both clients land here independently and call startMatch with synced inputs.
-    menuSel[0] = CHAR_KEYS.indexOf(netPending.hostChar);
-    menuSel[1] = CHAR_KEYS.indexOf(netPending.guestChar);
-    matchSeed = netPending.seed;
+    if (!net.slots) return;
+    matchSeed = net.seed;
     netReset();
+    // startMatch() reads net.slots (host + guests have identical lobby state
+    // at this point) and spawns one fighter per occupied slot.
     startMatch();
   }
 
@@ -6867,9 +7625,10 @@
   const frameKeys = {};
   const INPUT_BTNS = ['left', 'right', 'up', 'down', 'block', 'special', 'attack'];
   function snapshotInputsLocal() {
-    // Local 2P: copy all keys that appear in either control map. Reads from the
-    // press latch too so quick taps (keydown+keyup between two sim frames) still
-    // fire the move. Latch is consumed here so it isn't double-counted next frame.
+    // Local 2P: copy all keys that appear in either real-keyboard control map.
+    // Slots 2/3 use phantom keycodes and stay at 0 in local mode (their fighters
+    // can't be controlled by a single keyboard — they're for online lobby only).
+    // Latch is consumed so quick taps register on the next sim frame.
     for (let i = 0; i < 2; i++) {
       const c = controls[i];
       for (const b of INPUT_BTNS) frameKeys[c[b]] = isHeld(c[b]);
@@ -6916,14 +7675,26 @@
     // For local play, freshen the seed each match so moves don't replay identically.
     if (net.mode === 'local') matchSeed = (Date.now() & 0x7fffffff) | 0;
     rngSeed(matchSeed);
-    const p1Key = CHAR_KEYS[menuSel[0]];
-    const p2Key = CHAR_KEYS[menuSel[1]];
-    fighters = [
-      new Fighter(p1Key, W * 0.3, 1, 0),
-      new Fighter(p2Key, W * 0.7, -1, 1),
-    ];
-    fighters[0].invuln = 60;
-    fighters[1].invuln = 60;
+    // ----- Determine which slots are playing this match -----
+    // Online (when net.slots is populated): use the slot/char data from the
+    //   lobby; one fighter per occupied slot.
+    // Otherwise (local 2P or any legacy code path): fall back to menuSel[0..1].
+    let slotChars;
+    if (net.mode !== 'local' && net.slots) {
+      slotChars = net.slots.filter(s => s && s.char).map(s => s.char);
+    } else {
+      slotChars = [CHAR_KEYS[menuSel[0]], CHAR_KEYS[menuSel[1]]];
+    }
+    const N = Math.max(2, Math.min(MAX_PLAYERS, slotChars.length));
+    // Evenly spaced spawn positions across the stage view. Facing alternates so
+    // the outermost fighters look inward.
+    fighters = [];
+    for (let i = 0; i < N; i++) {
+      const fracX = (i + 1) / (N + 1);                // 1/3, 2/3 for 2P; 1/4, 2/4, 3/4 for 3P; etc.
+      const facing = (i < N / 2) ? 1 : -1;
+      fighters.push(new Fighter(slotChars[i] || CHAR_KEYS[0], W * fracX, facing, i));
+    }
+    for (const f of fighters) f.invuln = 60;
     winner = null;
     state = STATE.PLAY;
   }
@@ -9189,16 +9960,28 @@
   }
 
   function drawHUD() {
-    for (let i = 0; i < fighters.length; i++) {
+    // Lay out N HUD panels along the bottom edge. Panel width shrinks with
+    // player count so all fit cleanly: 2P → 220px panels with the original
+    // outer placement; 3-4P → equal-width panels distributed across the screen.
+    const N = fighters.length;
+    const panelW = N <= 2 ? 220 : Math.min(220, Math.floor((W - 40 - (N - 1) * 12) / N));
+    for (let i = 0; i < N; i++) {
       const f = fighters[i];
-      const baseX = i === 0 ? 40 : W - 260;
+      let baseX;
+      if (N === 2) {
+        baseX = i === 0 ? 40 : W - 260;
+      } else {
+        const totalW = N * panelW + (N - 1) * 12;
+        baseX = Math.floor((W - totalW) / 2) + i * (panelW + 12);
+      }
       const y = H - 80;
+      const PW = panelW;
 
       ctx.fillStyle = '#22223a';
-      ctx.fillRect(baseX, y, 220, 60);
+      ctx.fillRect(baseX, y, PW, 60);
       ctx.strokeStyle = f.def.color;
       ctx.lineWidth = 2;
-      ctx.strokeRect(baseX, y, 220, 60);
+      ctx.strokeRect(baseX, y, PW, 60);
 
       // name
       ctx.fillStyle = f.def.color;
@@ -9212,61 +9995,65 @@
       ctx.font = 'bold 22px sans-serif';
       ctx.fillText(`${dmg}%`, baseX + 10, y + 46);
 
-      // stocks
+      // stocks — three pips anchored to the panel's right edge.
+      const stockBaseX = baseX + PW - 80;
       for (let s = 0; s < 3; s++) {
         ctx.fillStyle = s < f.stocks ? f.def.color : '#333';
         ctx.beginPath();
-        ctx.arc(baseX + 140 + s * 20, y + 40, 6, 0, Math.PI*2);
+        ctx.arc(stockBaseX + s * 20, y + 40, 6, 0, Math.PI*2);
         ctx.fill();
       }
+
+      // Per-status meters share a 60-wide column near the right side of the panel.
+      const meterX = baseX + Math.max(70, PW - 140);
 
       // Poison status indicator
       if (f.poisonTimer > 0) {
         const poisonFrac = f.poisonTimer / 90;
         ctx.fillStyle = '#2a3a22';
-        ctx.fillRect(baseX + 80, y + 8, 60, 6);
+        ctx.fillRect(meterX, y + 8, 60, 6);
         ctx.fillStyle = '#5aaf3a';
-        ctx.fillRect(baseX + 80, y + 8, 60 * poisonFrac, 6);
+        ctx.fillRect(meterX, y + 8, 60 * poisonFrac, 6);
         ctx.fillStyle = '#b6ff6a';
         ctx.font = 'bold 9px sans-serif';
-        ctx.fillText('POISONED', baseX + 80, y + 24);
+        ctx.fillText('POISONED', meterX, y + 24);
       }
 
       // Cole-only: fuel meter
       if (f.key === 'cole') {
         const fuelFrac = f.fuel / f.maxFuel;
         ctx.fillStyle = '#2a2018';
-        ctx.fillRect(baseX + 80, y + 30, 60, 6);
+        ctx.fillRect(meterX, y + 30, 60, 6);
         // Color shifts from orange (full) → red (low)
         const fuelColor = fuelFrac > 0.4 ? '#ff8a3a' : (fuelFrac > 0.15 ? '#ff6a2a' : '#a34040');
         ctx.fillStyle = fuelColor;
-        ctx.fillRect(baseX + 80, y + 30, 60 * fuelFrac, 6);
+        ctx.fillRect(meterX, y + 30, 60 * fuelFrac, 6);
         ctx.fillStyle = '#ffaa33';
         ctx.font = 'bold 9px sans-serif';
-        ctx.fillText('FUEL', baseX + 80, y + 28);
+        ctx.fillText('FUEL', meterX, y + 28);
       }
       // Angus-only: code meter (gained from damage taken, spent on platforms / dashes)
       if (f.key === 'angus') {
         const codeFrac = f.code / f.maxCode;
         ctx.fillStyle = '#0a2010';
-        ctx.fillRect(baseX + 80, y + 30, 60, 6);
+        ctx.fillRect(meterX, y + 30, 60, 6);
         ctx.fillStyle = codeFrac >= 1 ? '#aaffaa' : '#39ff14';
-        ctx.fillRect(baseX + 80, y + 30, 60 * codeFrac, 6);
+        ctx.fillRect(meterX, y + 30, 60 * codeFrac, 6);
         ctx.fillStyle = '#39ff14';
         ctx.font = 'bold 9px monospace';
-        ctx.fillText('CODE ' + Math.floor(f.code), baseX + 80, y + 28);
+        ctx.fillText('CODE ' + Math.floor(f.code), meterX, y + 28);
       }
 
       // Fueled (gasoline-doused) status — shown for any non-Cole fighter who's been doused
       if (f.fueled > 0 && f.key !== 'cole') {
         const ff = f.fueled / 240;
         ctx.fillStyle = '#2a1810';
-        ctx.fillRect(baseX + 80, y + 38, 60, 5);
+        ctx.fillRect(meterX, y + 38, 60, 5);
         ctx.fillStyle = '#8a6a3a';
-        ctx.fillRect(baseX + 80, y + 38, 60 * ff, 5);
+        ctx.fillRect(meterX, y + 38, 60 * ff, 5);
         ctx.fillStyle = '#d4a468';
         ctx.font = 'bold 8px sans-serif';
-        ctx.fillText('FUELED', baseX + 80, y + 50);
+        ctx.fillText('FUELED', meterX, y + 50);
       }
     }
   }
@@ -9277,7 +10064,7 @@
   let menuModeIdx = 0;          // 0=LOCAL, 1=HOST, 2=JOIN, 3=MOVESETS
   let menuStadiumIdx = 0;       // index into STAGE_KEYS
   let joinCodeInput = '';
-  const MODE_LABELS = ['LOCAL 2P', 'HOST ONLINE', 'JOIN ONLINE', 'MOVESET KEY'];
+  const MODE_LABELS = ['LOCAL 2P', 'HOST PARTY', 'JOIN PARTY', 'MOVESET KEY', 'SPRITES'];
   const ROOM_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
   function updateMenu() {
@@ -9305,9 +10092,12 @@
           net.mode = 'guest';
           joinCodeInput = '';
           menuStage = 'code';
-        } else {
+        } else if (menuModeIdx === 3) {
           // MOVESET KEY — open the moveset reference panel.
           menuStage = 'movesets';
+        } else {
+          // SPRITES — open the user-upload pixel-sprite manager (HTML overlay).
+          openSpriteManager();
         }
       }
     } else if (menuStage === 'stadium') {
@@ -9347,69 +10137,68 @@
         }
       }
     } else if (menuStage === 'chars') {
-      // Local 2P: each player uses their own control scheme.
-      // Online: the local player always uses the P1 scheme (WASD/LShift/F/G)
-      // regardless of which fighter index they own. (fighterIdx, keyboardCtrl) pairs.
-      const pickers = (net.mode === 'local')
-        ? [{ fighterIdx: 0, ctrl: controls[0] }, { fighterIdx: 1, ctrl: controls[1] }]
-        : [{ fighterIdx: net.mode === 'host' ? 0 : 1, ctrl: controls[0] }];
-      for (const { fighterIdx: i, ctrl } of pickers) {
-        if (!menuConfirm[i]) {
-          if (tap(ctrl.left)) menuSel[i] = (menuSel[i] + CHAR_KEYS.length - 1) % CHAR_KEYS.length;
-          if (tap(ctrl.right)) menuSel[i] = (menuSel[i] + 1) % CHAR_KEYS.length;
-          if (tap(ctrl.special)) {
-            menuConfirm[i] = true;
-            // First confirm in net mode opens the connection. On rematch (peer
-            // already exists), instead push our latest char selection to the peer.
-            if (net.mode === 'host') {
-              if (!net.peer) {
-                startHost(CHAR_KEYS[menuSel[0]]);
-              } else if (net.conn && netPending) {
-                netPending.hostChar = CHAR_KEYS[menuSel[0]];
-                try { net.conn.send({ t: 'init', hostChar: netPending.hostChar, seed: netPending.seed, stage: currentStage }); } catch (e) {}
-              }
-            } else if (net.mode === 'guest') {
-              if (!net.peer) {
-                startGuest(net.roomCode, CHAR_KEYS[menuSel[1]]);
-              } else if (net.conn && netPending) {
-                netPending.guestChar = CHAR_KEYS[menuSel[1]];
-                try { net.conn.send({ t: 'guestChar', char: netPending.guestChar }); } catch (e) {}
-              }
+      // Local 2P: each player uses their own keyboard scheme (unchanged).
+      // Online: the local player always uses the P1 scheme. LEFT/RIGHT change
+      //   the picked character; SPECIAL toggles READY. Host: SPECIAL=ready,
+      //   ENTER starts the match when all occupied slots are ready (≥2).
+      if (net.mode === 'local') {
+        const pickers = [{ fighterIdx: 0, ctrl: controls[0] }, { fighterIdx: 1, ctrl: controls[1] }];
+        for (const { fighterIdx: i, ctrl } of pickers) {
+          if (!menuConfirm[i]) {
+            if (tap(ctrl.left)) menuSel[i] = (menuSel[i] + CHAR_KEYS.length - 1) % CHAR_KEYS.length;
+            if (tap(ctrl.right)) menuSel[i] = (menuSel[i] + 1) % CHAR_KEYS.length;
+            if (tap(ctrl.special)) menuConfirm[i] = true;
+          } else if (tap(ctrl.block)) {
+            menuConfirm[i] = false;
+          }
+        }
+        if (tap('Enter') && menuConfirm[0] && menuConfirm[1]) startMatch();
+      } else {
+        // Online lobby — first entry opens the connection.
+        if (!net.peer) {
+          if (net.mode === 'host') startHost(CHAR_KEYS[menuSel[0]]);
+          else startGuest(net.roomCode, CHAR_KEYS[menuSel[0]]);
+        }
+        const ctrl = controls[0];
+        const mySlot = net.localSlot >= 0 ? net.localSlot : 0;
+        const me = net.slots && net.slots[mySlot];
+        if (me && !me.ready) {
+          // Pick character while unready
+          if (tap(ctrl.left) || tap(ctrl.right)) {
+            const dir = tap(ctrl.left) ? -1 : 1;
+            const idx = (CHAR_KEYS.indexOf(me.char) + CHAR_KEYS.length + dir) % CHAR_KEYS.length;
+            me.char = CHAR_KEYS[idx];
+            menuSel[0] = idx;
+            if (net.mode === 'host') broadcastLobby();
+            else if (net.connected && net.hostConn) {
+              try { net.hostConn.send({ t: 'pick', char: me.char }); } catch (e) {}
             }
           }
-        } else if (tap(ctrl.block)) {
-          menuConfirm[i] = false;
-          // In net mode, only tear down the connection if we never actually
-          // connected (still in pre-handshake). Once a peer is established
-          // — including in the post-match LOBBY — un-confirming should JUST
-          // un-mark the character pick. Tearing down here would invalidate
-          // the host's room code and drop the guest mid-lobby. Press ESC to
-          // explicitly leave the lobby.
-          if (net.mode !== 'local' && !net.everConnected) {
-            netCleanup();
-            net.statusText = '';
+          if (tap(ctrl.special)) {
+            me.ready = true;
+            if (net.mode === 'host') broadcastLobby();
+            else if (net.connected && net.hostConn) {
+              try { net.hostConn.send({ t: 'ready', ready: true }); } catch (e) {}
+            }
+          }
+        } else if (me && me.ready) {
+          if (tap(ctrl.block)) {
+            me.ready = false;
+            if (net.mode === 'host') broadcastLobby();
+            else if (net.connected && net.hostConn) {
+              try { net.hostConn.send({ t: 'ready', ready: false }); } catch (e) {}
+            }
           }
         }
-      }
-      // For online modes, mirror the picked char into netPending so a re-host/connect is consistent.
-      if (net.mode !== 'local' && netPending) {
-        if (net.mode === 'host') netPending.hostChar = CHAR_KEYS[menuSel[0]];
-        else netPending.guestChar = CHAR_KEYS[menuSel[1]];
-      }
-      // Start the match.
-      if (net.mode === 'local') {
-        if (tap('Enter') && menuConfirm[0] && menuConfirm[1]) startMatch();
-      } else if (net.mode === 'host') {
-        // Host needs both chars + connection, then ENTER to start.
-        if (tap('Enter') && menuConfirm[0] && netReadyToStart()) {
-          // Fresh seed per match so RNG outcomes (e.g. Jonah pellet spread)
-          // don't repeat in a rematch.
-          netPending.seed = (Math.random() * 0x7fffffff) | 0;
-          try { net.conn && net.conn.send({ t: 'startMatch', seed: netPending.seed }); } catch (e) {}
+        // Host: ENTER starts the match when ≥2 slots are filled and all ready.
+        if (net.mode === 'host' && tap('Enter') && lobbyReadyToStart()) {
+          net.seed = (Math.random() * 0x7fffffff) | 0;
+          const start = { t: 'start', slots: net.slots, seed: net.seed };
+          for (const slot in net.conns) {
+            try { net.conns[slot].send(start); } catch (e) {}
+          }
           beginNetMatch();
         }
-      } else {
-        // Guest waits for host's startMatch signal — handled in handleNetMsg.
       }
     }
 
@@ -9739,14 +10528,21 @@
 
     if (menuStage === 'mode') {
       ctx.fillText('Choose mode', W/2, 108);
-      // Four mode buttons in a 2x2 grid
-      const btnW = 220, btnH = 60, gapX = 30, gapY = 16;
-      const totalW = 2 * btnW + gapX;
-      const totalH = 2 * btnH + gapY;
-      const startX = W/2 - totalW/2;
+      // Mode buttons in a 3-wide grid: 2 rows (top-row 3 buttons, bottom-row 2).
+      const btnW = 200, btnH = 56, gapX = 22, gapY = 14;
+      const colsPerRow = 3;
+      const rowCount = Math.ceil(MODE_LABELS.length / colsPerRow);
+      const totalH = rowCount * btnH + (rowCount - 1) * gapY;
       const startY = H/2 - totalH/2 + 10;
       for (let m = 0; m < MODE_LABELS.length; m++) {
-        const col = m % 2, row = (m / 2) | 0;
+        const row = Math.floor(m / colsPerRow);
+        const col = m % colsPerRow;
+        // Each row centres the buttons it actually contains, so the trailing
+        // partial row sits flush under the centre of the row above it.
+        const rowStart = row * colsPerRow;
+        const rowLen = Math.min(colsPerRow, MODE_LABELS.length - rowStart);
+        const rowTotalW = rowLen * btnW + (rowLen - 1) * gapX;
+        const startX = W/2 - rowTotalW/2;
         const bx = startX + col * (btnW + gapX);
         const by = startY + row * (btnH + gapY);
         const sel = m === menuModeIdx;
@@ -9756,8 +10552,8 @@
         ctx.lineWidth = sel ? 3 : 1.5;
         ctx.strokeRect(bx, by, btnW, btnH);
         ctx.fillStyle = sel ? '#ffeb3b' : '#aaa';
-        ctx.font = 'bold 20px sans-serif';
-        ctx.fillText(MODE_LABELS[m], bx + btnW/2, by + btnH/2 + 7);
+        ctx.font = 'bold 18px sans-serif';
+        ctx.fillText(MODE_LABELS[m], bx + btnW/2, by + btnH/2 + 6);
       }
       ctx.fillStyle = '#888';
       ctx.font = '12px sans-serif';
@@ -10194,19 +10990,52 @@
         title = `ROOM ${net.roomCode}`;
       }
       ctx.fillText(title, W/2, yOff);
-      ctx.fillStyle = net.connected ? '#a0e0d0' : '#888';
-      ctx.font = '12px sans-serif';
-      const remoteChar = net.mode === 'host' ? (netPending && netPending.guestChar) : (netPending && netPending.hostChar);
-      if (remoteChar) {
-        ctx.fillStyle = CHARS[remoteChar].color;
-        ctx.fillText('opponent: ' + CHARS[remoteChar].name.toUpperCase(), W/2, yOff + 18);
-      } else {
-        ctx.fillStyle = '#888';
-        ctx.fillText(net.statusText || 'waiting...', W/2, yOff + 18);
+      // Lobby roster — show every slot and its pick + ready state.
+      if (net.slots) {
+        ctx.font = 'bold 13px sans-serif';
+        let occupied = 0;
+        for (let s = 0; s < MAX_PLAYERS; s++) {
+          const slot = net.slots[s];
+          const lx = W/2 + (s - (MAX_PLAYERS - 1) / 2) * 140;
+          const ly = yOff + 30;
+          ctx.fillStyle = '#22223a';
+          ctx.fillRect(lx - 60, ly, 120, 32);
+          if (slot && slot.occupied) {
+            occupied++;
+            const def = CHARS[slot.char] || CHARS[CHAR_KEYS[0]];
+            ctx.strokeStyle = slot.ready ? '#aaff6a' : def.color;
+            ctx.lineWidth = 2;
+            ctx.strokeRect(lx - 60, ly, 120, 32);
+            ctx.fillStyle = def.color;
+            ctx.fillText(`P${s+1}  ${def.name.toUpperCase()}`, lx, ly + 14);
+            ctx.font = '11px sans-serif';
+            ctx.fillStyle = slot.ready ? '#aaff6a' : '#888';
+            ctx.fillText(slot.ready ? 'READY' : (s === net.localSlot ? 'PICKING' : 'WAITING'), lx, ly + 28);
+            ctx.font = 'bold 13px sans-serif';
+            if (s === net.localSlot) {
+              ctx.strokeStyle = '#ffeb3b';
+              ctx.lineWidth = 1;
+              ctx.strokeRect(lx - 62, ly - 2, 124, 36);
+            }
+          } else {
+            ctx.strokeStyle = '#444';
+            ctx.lineWidth = 1;
+            ctx.strokeRect(lx - 60, ly, 120, 32);
+            ctx.fillStyle = '#555';
+            ctx.fillText(`SLOT ${s+1}`, lx, ly + 14);
+            ctx.font = '11px sans-serif';
+            ctx.fillText('open', lx, ly + 28);
+            ctx.font = 'bold 13px sans-serif';
+          }
+        }
       }
       if (net.error) {
         ctx.fillStyle = '#ff4444';
-        ctx.fillText('error: ' + net.error, W/2, yOff + 36);
+        ctx.fillText('error: ' + net.error, W/2, yOff + 80);
+      } else if (net.statusText) {
+        ctx.fillStyle = '#888';
+        ctx.font = '11px sans-serif';
+        ctx.fillText(net.statusText, W/2, yOff + 80);
       }
     }
 
@@ -10215,26 +11044,26 @@
     if (net.mode === 'local') {
       ctx.fillText('P1: A/D cycle, G confirm, L-Shift cancel      P2: ←/→ cycle, / confirm, R-Shift cancel', W/2, H - 55);
     } else if (net.mode === 'host') {
-      ctx.fillText('A/D cycle, G confirm, L-Shift cancel      Share the room code with a friend', W/2, H - 55);
+      ctx.fillText('A/D pick fighter · G ready/unready (L-Shift) · ENTER start match · share the room code', W/2, H - 55);
     } else {
-      ctx.fillText('A/D cycle, G confirm, L-Shift cancel      Connecting to host...', W/2, H - 55);
+      ctx.fillText('A/D pick fighter · G ready/unready (L-Shift) · wait for host to start', W/2, H - 55);
     }
-    let ready = false, label = 'Both players must confirm';
+    let ready = false, label = '';
     if (net.mode === 'local') {
       ready = menuConfirm[0] && menuConfirm[1];
       label = ready ? 'Press ENTER to fight!' : 'Both players must confirm';
     } else if (net.mode === 'host') {
-      ready = menuConfirm[0] && netReadyToStart();
-      label = ready ? 'Press ENTER to fight!'
-            : (!menuConfirm[0]) ? 'Confirm your fighter to host'
-            : !net.connected ? 'Waiting for guest to join...'
-            : 'Waiting for guest to pick a fighter...';
+      const occCount = net.slots ? net.slots.filter(s => s && s.occupied).length : 0;
+      ready = lobbyReadyToStart();
+      label = ready ? `Press ENTER to start (${occCount} players)!`
+            : occCount < 2 ? `Waiting for players (${occCount}/4, need ≥2)...`
+            : 'Waiting for everyone to ready up...';
     } else {
+      const me = net.slots && net.localSlot >= 0 ? net.slots[net.localSlot] : null;
       ready = false;
-      label = !menuConfirm[1] ? 'Confirm your fighter to join'
-            : !net.connected ? 'Connecting to host...'
-            : !netReadyToStart() ? 'Waiting for host to pick a fighter...'
-            : 'Waiting for host to start the match...';
+      label = !net.connected ? 'Connecting to host...'
+            : (me && me.ready) ? 'Waiting for host to start the match...'
+            : 'Pick your fighter and press G to ready up';
     }
     ctx.fillStyle = ready ? '#4ab8ff' : '#555';
     ctx.font = 'bold 14px sans-serif';
@@ -10626,47 +11455,78 @@
       snapshotInputsLocal();
       return true;
     }
-    // Capture and send local input EXACTLY ONCE per slot. Critical: while we're
-    // stuck waiting for a remote frame, we get called repeatedly with the same
-    // currentFrame, so targetFrame stays the same. If we re-captured and
-    // overwrote localBuf without re-sending, our local copy and the peer's view
-    // would diverge — we'd play frame F+3 with our latest input, but the peer
-    // would play it with whatever we sent first. Hence the .has() guard.
+
+    // ----- Capture & send local input for frame F+inputDelay (once) -----
+    // The .has() guard is critical: while we're stuck waiting for a remote
+    // frame this function gets called repeatedly with the same currentFrame
+    // (so the same targetFrame). Re-capturing would diverge from what we
+    // already sent — peers would see frame F+3 played with a different input
+    // than we played it with.
     const targetFrame = net.currentFrame + net.inputDelay;
     if (!net.localBuf.has(targetFrame)) {
       const localMask = captureLocalInputBits();
       net.localBuf.set(targetFrame, localMask);
-      if (net.connected && net.conn) {
-        try {
-          net.conn.send({ t: 'input', frame: targetFrame, mask: localMask });
-          net.lastSentFrame = targetFrame;
-        } catch (e) { /* connection may have closed */ }
+      const msg = { t: 'input', slot: net.localSlot, frame: targetFrame, mask: localMask };
+      if (net.mode === 'host') {
+        // Host broadcasts its own input to every connected guest, and stashes
+        // it in remoteBufs[localSlot] so the shared "all-slots-ready" check
+        // treats local and remote inputs uniformly.
+        for (const slot in net.conns) {
+          try { net.conns[slot].send(msg); } catch (e) {}
+        }
+      } else if (net.mode === 'guest' && net.connected && net.hostConn) {
+        try { net.hostConn.send(msg); } catch (e) {}
+      }
+      net.lastSentFrame = targetFrame;
+    }
+
+    // ----- Gather inputs for currentFrame from every occupied slot -----
+    const F = net.currentFrame;
+    const localForFrame = net.localBuf.get(F);
+    const N = net.slots ? net.slots.filter(s => s && s.occupied).length : 2;
+    const masks = new Array(MAX_PLAYERS).fill(undefined);
+    masks[net.localSlot] = localForFrame;
+    let haveAll = (localForFrame !== undefined);
+    let waitingOnAnySlot = false;
+    if (net.slots) {
+      for (let s = 0; s < MAX_PLAYERS; s++) {
+        if (s === net.localSlot) continue;
+        if (!net.slots[s] || !net.slots[s].occupied) continue;
+        const m = net.remoteBufs[s] && net.remoteBufs[s].get(F);
+        if (m === undefined) { haveAll = false; waitingOnAnySlot = true; }
+        else masks[s] = m;
       }
     }
-    // Lookup inputs for the frame we're currently trying to advance past.
-    const localForFrame = net.localBuf.get(net.currentFrame);
-    const remoteForFrame = net.remoteBuf.get(net.currentFrame);
-    if (localForFrame === undefined || remoteForFrame === undefined) {
-      // First few frames before the buffer fills, treat as no-input.
-      if (net.currentFrame < net.inputDelay) {
-        applyInputBitsToFrame(net.localIndex, localForFrame || 0);
-        applyInputBitsToFrame(1 - net.localIndex, remoteForFrame || 0);
+
+    if (!haveAll) {
+      // First few frames before the buffer fills — treat missing inputs as zero
+      // so peers can ramp up together. Any missing slot during this window is
+      // fine because the input-delay buffer hasn't been filled yet anywhere.
+      if (F < net.inputDelay) {
+        for (let s = 0; s < MAX_PLAYERS; s++) {
+          applyInputBitsToFrame(s, masks[s] || 0);
+        }
         net.waitingForRemote = false;
         net.currentFrame++;
         return true;
       }
-      // Past initial window — we're stuck waiting on remote input.
-      net.waitingForRemote = (remoteForFrame === undefined);
+      net.waitingForRemote = waitingOnAnySlot;
       return false;
     }
-    applyInputBitsToFrame(net.localIndex, localForFrame);
-    applyInputBitsToFrame(1 - net.localIndex, remoteForFrame);
+
+    for (let s = 0; s < MAX_PLAYERS; s++) {
+      applyInputBitsToFrame(s, masks[s] || 0);
+    }
     net.waitingForRemote = false;
-    // Cleanup old buffer entries
-    if (net.currentFrame % 60 === 0) {
-      const cutoff = net.currentFrame - 30;
+
+    // GC old buffer entries every second.
+    if (F % 60 === 0) {
+      const cutoff = F - 30;
       for (const k of net.localBuf.keys()) if (k < cutoff) net.localBuf.delete(k);
-      for (const k of net.remoteBuf.keys()) if (k < cutoff) net.remoteBuf.delete(k);
+      for (let s = 0; s < MAX_PLAYERS; s++) {
+        const buf = net.remoteBufs[s];
+        if (buf) for (const k of buf.keys()) if (k < cutoff) buf.delete(k);
+      }
     }
     net.currentFrame++;
     return true;
@@ -10725,10 +11585,18 @@
     stepStageHook();
     updateCamera();
     // Online: every 60 frames, exchange a state hash with the peer.
-    if (net.mode !== 'local' && net.connected && net.currentFrame > 0 && net.currentFrame % 60 === 0) {
+    if (net.mode !== 'local' && net.currentFrame > 0 && net.currentFrame % 60 === 0) {
       const h = computeStateHash();
       net.hashHistory.set(net.currentFrame, h);
-      try { net.conn && net.conn.send({ t: 'hash', frame: net.currentFrame, hash: h }); } catch (e) {}
+      const hashMsg = { t: 'hash', frame: net.currentFrame, hash: h };
+      // Hub-and-spoke: guests send to host, host sends to every guest.
+      if (net.mode === 'guest' && net.hostConn) {
+        try { net.hostConn.send(hashMsg); } catch (e) {}
+      } else if (net.mode === 'host') {
+        for (const slot in net.conns) {
+          try { net.conns[slot].send(hashMsg); } catch (e) {}
+        }
+      }
       for (const k of net.hashHistory.keys()) if (k < net.currentFrame - 600) net.hashHistory.delete(k);
     }
     const alive = fighters.filter(f => f.stocks > 0);
@@ -10889,6 +11757,13 @@
     renderFrame();
     requestAnimationFrame(loop);
   }
+
+  // Load user-uploaded sprite sheets from localStorage + wire up the sprite
+  // manager overlay's DOM event handlers. Both safe to call before the game
+  // loop starts since they only touch elements that exist in the static
+  // HTML at top of file.
+  loadCustomSprites();
+  initSpriteManagerUI();
 
   requestAnimationFrame(loop);
 })();
