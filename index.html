@@ -540,19 +540,30 @@
   //   run  (onGround, |vx| > 3)      → run
   //   jump (!onGround)               → jump
   //   attack (attackCooldown > 0)    → attack
-  //   hit (hitstun > 0)              → hit (preempts everything)
+  //   hit (hitstun > 0)              → hit (falls back to attack if missing)
+  //
+  // bodyFrac / feetFrac per character: each character's silhouette occupies a
+  // different fraction of its source frame (Jonah is a small floaty angel —
+  // 52% h, Kele a hulking bruiser — 69% h). Measured from the actual frame 0
+  // bbox so each fighter lands cleanly on the ground line at the procedural
+  // size. If unset, defaults are 0.60 / 0.78.
+  const AUTOSPRITE_GRID = { cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256 };
+  const AUTOSPRITE_FPS  = { idle: 12, walk: 24, run: 30, jump: 24, attack: 60, hit: 60 };
+  function autospriteBundle(key, anims, opts) {
+    opts = opts || {};
+    const animations = {};
+    for (const name of anims) {
+      animations[name] = Object.assign({ url: `sprites/${key}/${name}.png`, fps: AUTOSPRITE_FPS[name] || 24 }, AUTOSPRITE_GRID);
+    }
+    return { multi: true, animations, bodyFrac: opts.bodyFrac, feetFrac: opts.feetFrac };
+  }
   const BUILTIN_SPRITES = {
-    nico: {
-      multi: true,
-      animations: {
-        idle:   { url: 'sprites/nico/idle.png',   cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 12 },
-        walk:   { url: 'sprites/nico/walk.png',   cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 24 },
-        run:    { url: 'sprites/nico/run.png',    cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 30 },
-        jump:   { url: 'sprites/nico/jump.png',   cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 24 },
-        attack: { url: 'sprites/nico/attack.png', cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 60 },
-        hit:    { url: 'sprites/nico/hit.png',    cols: 7, rows: 7, frameCount: 49, frameW: 256, frameH: 256, fps: 60 },
-      },
-    },
+    nico:    autospriteBundle('nico',    ['idle','walk','run','jump','attack','hit'], { bodyFrac: 0.63, feetFrac: 0.81 }),
+    jonah:   autospriteBundle('jonah',   ['idle','walk','run','jump','attack'],       { bodyFrac: 0.52, feetFrac: 0.77 }),
+    kele:    autospriteBundle('kele',    ['idle','walk','run','jump','attack'],       { bodyFrac: 0.69, feetFrac: 0.86 }),
+    greyson: autospriteBundle('greyson', ['idle','walk','run','jump','attack'],       { bodyFrac: 0.67, feetFrac: 0.84 }),
+    rhys:    autospriteBundle('rhys',    ['idle','walk','run','jump','attack','hit'], { bodyFrac: 0.68, feetFrac: 0.85 }),
+    derek:   autospriteBundle('derek',   ['idle','walk','run','jump','attack','hit'], { bodyFrac: 0.66, feetFrac: 0.85 }),
   };
 
   function loadCustomSprites() {
@@ -577,7 +588,12 @@
   // Multi-animation sprite installer. Each animation has its own Image() that
   // sets imgReady when loaded; tryDrawSpriteSheet picks the right one per frame.
   function installMultiAnimationSprite(key, def) {
-    const entry = { multi: true, animations: {} };
+    const entry = {
+      multi: true,
+      animations: {},
+      bodyFrac: def.bodyFrac,                // optional per-character override
+      feetFrac: def.feetFrac,
+    };
     for (const animName of Object.keys(def.animations)) {
       const a = def.animations[animName];
       const img = new Image();
@@ -4818,14 +4834,13 @@
       const isHiRes = anim.frameW > 96 || anim.frameH > 96;
       ctx.imageSmoothingEnabled = isHiRes;
       if (isHiRes) ctx.imageSmoothingQuality = 'high';
-      // Autosprite frames are 256×256 with the character centered. Calibrated
-      // against Nico's six animations: the visible character occupies ~60% of
-      // the frame's height and the feet sit ~78% down the frame (varies 71-88%
-      // by animation; jump apex pulls the feet highest, attack flares lower).
-      // Scale: map the source character's height to the fighter's hit-box
-      // height so weapons + flame tuft retain their margin.
-      const SRC_BODY_FRAC = 0.60;
-      const SRC_FEET_FRAC = 0.78;
+      // Autosprite frames are 256×256 with the character centered. The visible
+      // silhouette occupies a per-character fraction of the frame height
+      // (measured at install time from the actual frame 0 alpha bbox so each
+      // fighter lands cleanly on the ground line at the procedural body size).
+      // Defaults are an average over the roster when an override is unset.
+      const SRC_BODY_FRAC = sf.bodyFrac || 0.62;
+      const SRC_FEET_FRAC = sf.feetFrac || 0.81;
       const bodyScale = bodyH / (anim.frameH * SRC_BODY_FRAC);
       const drawW = anim.frameW * bodyScale;
       const drawH = anim.frameH * bodyScale;
