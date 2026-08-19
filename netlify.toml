@@ -1,2 +1,12 @@
 [build]
+  # Pinned explicitly so the repo is the source of truth for the deploy.
+  #
+  # `base` is set here because the Netlify UI's "Base directory" field had the
+  # BRANCH NAME (claude/deploy-to-netlify-518LD) in it, which made every build
+  # die at config-parse time with "Base directory does not exist". Values in
+  # netlify.toml override the UI, so pinning base to the repo root fixes it
+  # regardless of what that field currently says.
+  base = "."
+
+  # Static site — index.html and sprites/ are served from the repo root as-is.
   publish = "."
