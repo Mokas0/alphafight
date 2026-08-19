@@ -1,12 +1,17 @@
-[build]
-  # Pinned explicitly so the repo is the source of truth for the deploy.
-  #
-  # `base` is set here because the Netlify UI's "Base directory" field had the
-  # BRANCH NAME (claude/deploy-to-netlify-518LD) in it, which made every build
-  # die at config-parse time with "Base directory does not exist". Values in
-  # netlify.toml override the UI, so pinning base to the repo root fixes it
-  # regardless of what that field currently says.
-  base = "."
+# Static site — index.html and sprites/ are served from the repo root as-is.
+#
+# NOTE: this file is currently NOT the one driving the deploy. The Netlify
+# site has its UI "Base directory" field set to the branch name
+# (claude/deploy-to-netlify-518LD), so Netlify reads the netlify.toml inside
+# THAT directory instead. See claude/deploy-to-netlify-518LD/README.md for the
+# full explanation and how to undo it.
+#
+# Once the Base directory field is cleared in the Netlify UI and the claude/
+# directory is deleted, this file takes over again and needs no changes.
+#
+# Deliberately no `base` key here: setting one cannot fix a bad UI base
+# directory, because Netlify uses the base directory to locate this file
+# before it ever parses it.
 
-  # Static site — index.html and sprites/ are served from the repo root as-is.
+[build]
   publish = "."

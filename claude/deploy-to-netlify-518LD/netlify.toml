@@ -1,0 +1,25 @@
+# WORKAROUND — this directory only exists to satisfy a misconfigured Netlify
+# setting. It contains no site content.
+#
+# The Netlify site has its UI "Base directory" field set to the BRANCH NAME
+# (claude/deploy-to-netlify-518LD) instead of being left empty. Netlify cd's
+# into that path before reading any configuration, so every build died with:
+#
+#   When resolving config file /opt/build/repo/netlify.toml:
+#   Base directory does not exist: /opt/build/repo/claude/deploy-to-netlify-518LD
+#
+# That failure happens BEFORE the root netlify.toml is applied, so the root
+# file cannot fix it — a config file can't override the setting used to find
+# the config file. Creating the directory lets the build proceed, and this
+# netlify.toml points publish back up at the real site at the repo root.
+#
+# publish is resolved relative to the base directory:
+#   /opt/build/repo/claude/deploy-to-netlify-518LD/../../  ->  /opt/build/repo
+#
+# THE PROPER FIX is to clear the Base directory field in
+#   Site configuration -> Build & deploy -> Continuous deployment -> Build settings
+# Once that field is empty, DELETE this whole directory — the root netlify.toml
+# takes over and publishes the repo root directly.
+
+[build]
+  publish = "../../"
