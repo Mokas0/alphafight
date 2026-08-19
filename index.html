@@ -1042,6 +1042,22 @@
     effects.push(e);
   }
 
+  // Meteor-smash burst: a downward comet of sparks so a spike reads instantly
+  // as "you got sent DOWN" rather than as just another hit. Display-only —
+  // `effects` is not part of computeStateHash, so Math.random() here can never
+  // desync an online match (same convention as the rest of the particle code).
+  function spawnMeteorStreak(x, y) {
+    for (let i = 0; i < 14; i++) {
+      spawnEffect(x + (Math.random() - 0.5) * 26, y + (Math.random() - 0.5) * 10,
+        i % 3 === 0 ? '#ffffff' : (i % 3 === 1 ? '#ff4444' : '#ff8a3a'),
+        16 + Math.random() * 10, 4 + Math.random() * 4,
+        { vx: (Math.random() - 0.5) * 3, vy: 5 + Math.random() * 7, gravity: 0.5, drag: 0.96 });
+    }
+    // Two bright rings pulsing downward mark the meteor's origin point.
+    spawnEffect(x, y + 6, '#ffffff', 14, 22);
+    spawnEffect(x, y + 16, '#ff4444', 18, 30);
+  }
+
   // ---------- ANIMATION ENGINE: EASING + CAMERA SHAKE ----------
   // Pure-JS easing curves used by particles, the camera shake, and per-move
   // visual timing. These replace linear `t/N` ramps anywhere a snappy feel
@@ -1720,9 +1736,12 @@
         this.moveState = { type: 'atk_uair', timer: 20, active: [4, 12],
           dmg: 7, kbx: this.facing * 1, kby: -7, reach: 22, vertical: -1, flavor };
       } else if (dir === 'dair') {
-        // down air — spike
+        // down air — SPIKE. Active 6-14, but the meteor only lands on frames
+        // 6-10 (the sweetspot); 11-14 is the sour spot that pops them up
+        // weakly instead. applyAttackFlavor() retunes both per character.
         this.moveState = { type: 'atk_dair', timer: 22, active: [6, 14],
-          dmg: 9, kbx: this.facing * 1.5, kby: 6, reach: 22, vertical: 1, spike: true, flavor };
+          dmg: 9, kbx: this.facing * 1.5, kby: 6, reach: 22, vertical: 1,
+          spike: true, spikeWindow: [6, 10], spikePower: 12, spikeStun: 18, flavor };
       }
       // Apply per-character flavor — character-specific tweaks to certain attacks.
       this.applyAttackFlavor();
@@ -1748,13 +1767,28 @@
       if (!this.moveState) return;
       const k = this.key, t = this.moveState.type, m = this.moveState;
 
-      // Nico — fire-flavor jab + crushing fire spike on dair
+      // ---- NICO — fire rushdown. Fast, lingering flame hitboxes; his dair is
+      // a heavy fire meteor that rewards committing to the offstage read.
       if (k === 'nico') {
         if (t === 'atk_jab') { m.dmg += 1.5; }
-        if (t === 'atk_dair') { m.dmg = 12; m.kby = 9; }
+        if (t === 'atk_nair') {              // flame burst: wide + lingering
+          m.dmg = 7; m.reach = 32; m.timer = 26; m.initTimer = 26; m.active = [3, 20];
+        }
+        if (t === 'atk_fair') {              // quick fire jab, low commit
+          m.dmg = 7; m.timer = 16; m.initTimer = 16; m.active = [4, 10];
+        }
+        if (t === 'atk_uair') { m.dmg = 8; m.kby = -8; }   // fire plume
+        if (t === 'atk_bair') {              // spinning fire kick
+          m.dmg = 10; m.kbx = -this.facing * 5.5; m.reach = 34;
+        }
+        if (t === 'atk_dair') {              // FIRE METEOR
+          m.dmg = 12; m.kby = 9;
+          m.spikeWindow = [6, 10]; m.spikePower = 14; m.spikeStun = 20;
+        }
       }
 
-      // Derek — projectile fair (mini shuriken) + extended-active nair
+      // ---- DEREK — ninja zoner. Projectile fair, long-active nair for
+      // spacing, and a precise kunai spike with the tightest window around.
       if (k === 'derek') {
         if (t === 'atk_fair') {
           m.dmg = 4;
@@ -1771,22 +1805,59 @@
         if (t === 'atk_nair') {
           m.timer = 28; m.initTimer = 28; m.active = [3, 22]; m.reach = 30;
         }
+        if (t === 'atk_bair') { m.dmg = 10; m.timer = 17; m.initTimer = 17; m.active = [4, 10]; }
+        if (t === 'atk_uair') { m.dmg = 7; m.kby = -8; }   // rising slash
+        if (t === 'atk_dair') {              // KUNAI SPIKE — fast, unforgiving
+          m.dmg = 8; m.kby = 8; m.timer = 18; m.initTimer = 18; m.active = [5, 12];
+          m.spikeWindow = [5, 8]; m.spikePower = 12; m.spikeStun = 18;
+        }
       }
 
-      // Rhys — dair is a poison-tipped spike (still nerfed by 0.55 base)
+      // ---- RHYS — poison trapper. Everything hits soft (0.55 global mult in
+      // getHitbox) but coats them in DoT. His spike trades power for the most
+      // forgiving window in the roster: the poison is the real payoff.
       if (k === 'rhys') {
-        if (t === 'atk_dair') { m.kby = 10; m.poison = true; }
+        if (t === 'atk_nair') {              // lingering poison cloud
+          m.dmg = 5; m.reach = 34; m.timer = 30; m.initTimer = 30; m.active = [4, 26];
+          m.poison = true;
+        }
+        if (t === 'atk_fair') { m.poison = true; }
+        if (t === 'atk_bair') {              // poison tail-lash
+          m.dmg = 8; m.reach = 40; m.poison = true;
+        }
+        if (t === 'atk_uair') {              // spore puff — weak, wide, poisons
+          m.dmg = 5; m.kby = -6; m.reach = 30; m.poison = true;
+        }
+        if (t === 'atk_dair') {              // POISON METEOR — generous window
+          m.kby = 10; m.poison = true;
+          m.spikeWindow = [6, 12]; m.spikePower = 11; m.spikeStun = 18;
+        }
       }
 
-      // Greyson — wide low-sweep dtilt (stuns prone)
+      // ---- GREYSON — military hybrid. Wide sweeps and a boot-stomp meteor.
       if (k === 'greyson') {
         if (t === 'atk_dtilt') {
           m.dmg = 7; m.reach = 50; m.timer = 22; m.initTimer = 22; m.active = [6, 14];
           m.kbx = this.facing * 4.5;
         }
+        if (t === 'atk_bair') {              // rifle-butt smash
+          m.dmg = 11; m.kbx = -this.facing * 6;
+        }
+        if (t === 'atk_nair') { m.dmg = 7; m.reach = 30; }
+        if (t === 'atk_fair') {              // combat-knife slash
+          m.dmg = 9; m.reach = 40; m.timer = 18; m.initTimer = 18; m.active = [5, 12];
+        }
+        if (t === 'atk_uair') {              // rifle uppercut
+          m.dmg = 8; m.kby = -8; m.reach = 26;
+        }
+        if (t === 'atk_dair') {              // BOOT STOMP
+          m.dmg = 11; m.kby = 9;
+          m.spikeWindow = [7, 11]; m.spikePower = 14; m.spikeStun = 20;
+        }
       }
 
-      // Kele — heavy ftilt and bair (slow, big knockback)
+      // ---- KELE — heavyweight. Slowest aerials, but the hardest meteor in
+      // the game: land the 4-frame sweetspot offstage and it is simply over.
       if (k === 'kele') {
         if (t === 'atk_ftilt') {
           m.dmg = 11; m.kbx = this.facing * 7; m.kby = -4;
@@ -1795,9 +1866,22 @@
         if (t === 'atk_bair') {
           m.dmg = 12; m.kbx = -this.facing * 7;
         }
+        if (t === 'atk_nair') {              // slow but crushing
+          m.dmg = 10; m.timer = 26; m.initTimer = 26; m.active = [7, 18];
+        }
+        if (t === 'atk_uair') { m.dmg = 6; m.kby = -5; }   // heavies struggle upward
+        if (t === 'atk_fair') {              // huge forward haymaker, slow
+          m.dmg = 13; m.kbx = this.facing * 6.5; m.reach = 40;
+          m.timer = 26; m.initTimer = 26; m.active = [8, 15];
+        }
+        if (t === 'atk_dair') {              // BODY DROP — strongest spike
+          m.dmg = 16; m.kby = 11; m.timer = 28; m.initTimer = 28; m.active = [9, 18];
+          m.spikeWindow = [9, 12]; m.spikePower = 17; m.spikeStun = 26;
+        }
       }
 
-      // Jonah — multi-hit nair + huge launch on uair
+      // ---- JONAH — featherweight flier. Fast, weak, spammable aerials and a
+      // flutter spike that is easy to land but rarely kills on its own.
       if (k === 'jonah') {
         if (t === 'atk_nair') {
           m.dmg = 3; m.timer = 28; m.initTimer = 28; m.active = [3, 24];
@@ -1805,21 +1889,62 @@
         if (t === 'atk_uair') {
           m.dmg = 9; m.kby = -10;
         }
+        if (t === 'atk_fair') {              // quick flutter jab
+          m.dmg = 5; m.timer = 15; m.initTimer = 15; m.active = [3, 9];
+        }
+        if (t === 'atk_bair') { m.dmg = 7; m.timer = 17; m.initTimer = 17; m.active = [4, 10]; }
+        if (t === 'atk_dair') {              // FLUTTER SPIKE — weak + generous
+          m.dmg = 7; m.kby = 7; m.timer = 18; m.initTimer = 18; m.active = [4, 13];
+          m.spikeWindow = [4, 11]; m.spikePower = 9; m.spikeStun = 14;
+        }
       }
 
-      // Theo — utilt sends opponents straight up (great juggle starter)
+      // ---- THEO — dark-energy controller. Juggle-focused: big vertical
+      // launchers up top, and a spike that yanks them straight down.
       if (k === 'theo') {
         if (t === 'atk_utilt') {
           m.dmg = 8; m.kby = -10; m.kbx = this.facing * 0.5;
         }
+        if (t === 'atk_uair') {              // energy column
+          m.dmg = 9; m.kby = -10; m.reach = 30;
+        }
+        if (t === 'atk_nair') {              // energy pulse
+          m.dmg = 7; m.reach = 32;
+        }
+        if (t === 'atk_fair') {              // energy palm — pushes far
+          m.dmg = 8; m.kbx = this.facing * 6; m.reach = 38;
+        }
+        if (t === 'atk_bair') {              // dark backhand
+          m.dmg = 10; m.kbx = -this.facing * 5.5; m.reach = 38;
+        }
+        if (t === 'atk_dair') {              // GRAVITY WELL
+          m.dmg = 11; m.kby = 10;
+          m.spikeWindow = [6, 10]; m.spikePower = 13; m.spikeStun = 20;
+        }
       }
 
-      // Cole — bair smears them with gasoline (fueled status on hit)
+      // ---- COLE — pyromaniac. Aerials douse the target in fuel, setting up
+      // his ignite combos; the spike sends them down already burning.
       if (k === 'cole') {
         if (t === 'atk_bair') { m.fueled = true; }
+        if (t === 'atk_nair') {              // flame ring, also douses
+          m.dmg = 7; m.reach = 30; m.fueled = true;
+        }
+        if (t === 'atk_fair') {              // gasoline swipe — fast, douses
+          m.dmg = 7; m.reach = 38; m.timer = 17; m.initTimer = 17; m.active = [4, 11];
+          m.fueled = true;
+        }
+        if (t === 'atk_uair') {              // flame jet upward
+          m.dmg = 8; m.kby = -8; m.reach = 28; m.fueled = true;
+        }
+        if (t === 'atk_dair') {              // BURNING METEOR
+          m.dmg = 10; m.kby = 9; m.fueled = true;
+          m.spikeWindow = [6, 10]; m.spikePower = 12; m.spikeStun = 18;
+        }
       }
 
-      // Angus — dtilt fires a small "code bug" projectile that scuttles forward
+      // ---- ANGUS — hacker. Projectile pokes and multi-hit "code field"
+      // aerials; his FORCE QUIT spike has a forgiving window (he cheats).
       if (k === 'angus') {
         if (t === 'atk_dtilt') {
           m.dmg = 3;
@@ -1833,29 +1958,80 @@
             });
           });
         }
+        if (t === 'atk_nair') {              // code field — long active window
+          m.dmg = 4; m.reach = 32; m.timer = 28; m.initTimer = 28; m.active = [3, 23];
+        }
+        if (t === 'atk_fair') { m.dmg = 7; m.reach = 34; }
+        if (t === 'atk_bair') {              // backhand keyboard smash — quick,
+          // low commitment; he's a nerd, not a bruiser.
+          m.dmg = 8; m.kbx = -this.facing * 4.5; m.reach = 32;
+          m.timer = 17; m.initTimer = 17; m.active = [4, 10];
+        }
+        if (t === 'atk_uair') {              // vertical code spike
+          m.dmg = 7; m.kby = -9; m.reach = 28;
+        }
+        if (t === 'atk_dair') {              // FORCE QUIT — generous window
+          // Hitbox opens a frame early (5 rather than the default 6) so the
+          // whole sweetspot is actually reachable.
+          m.dmg = 10; m.kby = 9; m.active = [5, 14];
+          m.spikeWindow = [5, 11]; m.spikePower = 12; m.spikeStun = 18;
+        }
       }
 
-      // Aidan — fast jab with mildly randomized KB (rng() so it stays
-      // deterministic for online matches). Adds a chaotic feel.
+      // ---- AIDAN — jester. Chaotic, randomized numbers everywhere. Uses
+      // rng() (the seeded generator) rather than Math.random so online
+      // matches stay deterministic — every client rolls the same value.
       if (k === 'aidan') {
         if (t === 'atk_jab') {
           m.dmg = 3; m.timer = 9; m.initTimer = 9; m.active = [2, 6];
           m.kbx = this.facing * (2 + (rng() - 0.5) * 2);
         }
-      }
-
-      // Liam — ski pole gives +8 reach on horizontal swings... when he has it.
-      // After throwing it, his reach drops back to baseline.
-      if (k === 'liam' && this.hasPole) {
-        if (['atk_jab','atk_ftilt','atk_fair','atk_bair'].includes(t)) {
-          m.reach += 8;
-          m.dmg += 1;
+        if (t === 'atk_nair') {              // spinning bells
+          m.dmg = 6; m.reach = 32; m.timer = 24; m.initTimer = 24; m.active = [3, 18];
+        }
+        if (t === 'atk_fair') {              // wobbly mallet swing
+          m.dmg = 8 + (rng() - 0.5) * 3;
+          m.kbx = this.facing * (4 + (rng() - 0.5) * 2);
+        }
+        if (t === 'atk_bair') {              // bell swing behind — random KB
+          m.dmg = 9 + (rng() - 0.5) * 3;
+          m.kbx = -this.facing * (5 + (rng() - 0.5) * 2.5); m.reach = 38;
+        }
+        if (t === 'atk_uair') {              // juggling toss — random launch
+          m.dmg = 7 + (rng() - 0.5) * 2;
+          m.kby = -(8 + (rng() - 0.5) * 3); m.reach = 28;
+        }
+        if (t === 'atk_dair') {              // HAMMER BONK — randomized power
+          m.dmg = 13 + (rng() - 0.5) * 4;
+          m.kby = 10; m.timer = 24; m.initTimer = 24; m.active = [6, 15];
+          m.spikeWindow = [6, 11];
+          m.spikePower = 13 + (rng() - 0.5) * 4;    // 11..15 — a real gamble
+          m.spikeStun = 20;
         }
       }
 
-      // Colton — pool stick gives the longest reach in the roster (+14) but
-      // every horizontal swing is a few frames slower (more startup, more
-      // active window).
+      // ---- LIAM — ski pole extends every horizontal swing AND his spike.
+      // Throw the pole away and the reach bonus goes with it.
+      if (k === 'liam') {
+        if (this.hasPole && ['atk_jab','atk_ftilt','atk_fair','atk_bair'].includes(t)) {
+          m.reach += 8;
+          m.dmg += 1;
+        }
+        if (t === 'atk_uair') { m.dmg = 8; m.kby = -8; m.reach = 30; }  // pole thrust
+        if (t === 'atk_nair') {              // icy spin — wide, chilly
+          m.dmg = 6; m.reach = this.hasPole ? 36 : 26;
+          m.timer = 24; m.initTimer = 24; m.active = [3, 18];
+        }
+        if (t === 'atk_dair') {              // POLE STAB — long, precise
+          m.dmg = 11; m.kby = 9;
+          m.reach = this.hasPole ? 34 : 22;   // pole nearly doubles the range
+          m.spikeWindow = [6, 10]; m.spikePower = 13; m.spikeStun = 19;
+        }
+      }
+
+      // ---- COLTON — pool stick: the longest reach in the roster (+14), paid
+      // for with slower swings. His cue-smash spike is the hardest to time
+      // (3-frame window) and among the strongest when it lands.
       if (k === 'colton') {
         if (['atk_jab','atk_ftilt','atk_fair','atk_bair'].includes(t)) {
           m.reach += 14;
@@ -1863,11 +2039,65 @@
           m.timer += slow; m.initTimer = m.timer;
           m.active = [m.active[0] + 2, m.active[1] + 2];
         }
+        if (t === 'atk_nair') {              // slow cue spin, big radius
+          m.dmg = 7; m.reach = 36; m.timer = 26; m.initTimer = 26; m.active = [5, 20];
+        }
+        if (t === 'atk_uair') {              // cue thrust straight up — long
+          m.dmg = 8; m.kby = -8; m.reach = 34;
+        }
+        if (t === 'atk_dair') {              // CUE SMASH — 3-frame sweetspot
+          m.dmg = 13; m.kby = 10; m.reach = 34;
+          m.timer = 26; m.initTimer = 26; m.active = [8, 16];
+          m.spikeWindow = [8, 10]; m.spikePower = 15; m.spikeStun = 22;
+        }
       }
 
-      // Donny — boxer. Every basic attack hits noticeably harder. Bonus damage
-      // applied across the whole moveset; KB scales naturally with damage.
+      // ---- DREW — paladin. Sword reach on horizontals, shield-slam meteor.
+      if (k === 'drew') {
+        if (t === 'atk_fair') {              // long sword swing
+          m.dmg = 10; m.reach = 44;
+        }
+        if (t === 'atk_bair') {              // shield bash behind
+          m.dmg = 11; m.kbx = -this.facing * 6; m.reach = 38;
+        }
+        if (t === 'atk_nair') { m.dmg = 8; m.reach = 30; }
+        if (t === 'atk_uair') {              // sword thrust overhead — long
+          m.dmg = 9; m.kby = -8; m.reach = 32;
+        }
+        if (t === 'atk_dair') {              // SHIELD SLAM
+          m.dmg = 13; m.kby = 10; m.timer = 26; m.initTimer = 26; m.active = [7, 16];
+          m.spikeWindow = [7, 11]; m.spikePower = 15; m.spikeStun = 22;
+        }
+      }
+
+      // ---- WHITNEY — singer. Fast dragon-claw aerials with an early
+      // sweetspot; rewards aggressive, close-range offstage pressure.
+      if (k === 'whitney') {
+        if (t === 'atk_nair') {              // sound pulse
+          m.dmg = 7; m.reach = 32; m.timer = 24; m.initTimer = 24; m.active = [3, 18];
+        }
+        if (t === 'atk_uair') { m.dmg = 9; m.kby = -9; }   // note launch
+        if (t === 'atk_fair') { m.dmg = 9; m.timer = 18; m.initTimer = 18; m.active = [4, 11]; }
+        if (t === 'atk_bair') {              // hair whip — fast, long
+          m.dmg = 9; m.reach = 42; m.timer = 17; m.initTimer = 17; m.active = [4, 10];
+        }
+        if (t === 'atk_dair') {              // DRAGON CLAW — early sweetspot
+          m.dmg = 12; m.kby = 10; m.timer = 20; m.initTimer = 20; m.active = [5, 14];
+          m.spikeWindow = [5, 9]; m.spikePower = 14; m.spikeStun = 20;
+        }
+      }
+
+      // ---- DONNY — boxer. Runs LAST so his global damage bonus stacks on
+      // top of any per-move tuning above. Hammer-fist spike hits hardest of
+      // all once the multiplier lands.
       if (k === 'donny') {
+        if (t === 'atk_nair') {              // flurry — fast, many frames
+          m.dmg = 4; m.timer = 24; m.initTimer = 24; m.active = [3, 19];
+        }
+        if (t === 'atk_dair') {              // HAMMER FIST
+          m.dmg = 11; m.kby = 10; m.timer = 24; m.initTimer = 24; m.active = [7, 15];
+          m.spikeWindow = [7, 10]; m.spikePower = 16; m.spikeStun = 22;
+        }
         // +60% damage on jab/tilts/aerials. Floor at +3 so even tiny moves
         // still feel meatier.
         m.dmg = Math.max(m.dmg + 3, m.dmg * 1.6);
@@ -3836,9 +4066,25 @@
         // Rhys hits softer on regular attacks (trapper identity: low base, high DoT)
         let dmg = m.dmg;
         if (this.key === 'rhys') dmg = Math.max(1, dmg * 0.55);
+        // SPIKE SWEETSPOT — a move flagged `spike` only meteors during its
+        // spikeWindow frames. Connect outside that window and you get the
+        // "sour spot": reduced damage and a weak upward launch instead of the
+        // kill. Tight windows are the whole risk/reward of going for a spike;
+        // characters with generous windows pay for it in damage or startup.
+        let spike = !!m.spike;
+        let kby = m.kby;
+        if (spike && m.spikeWindow) {
+          const sweet = elapsed >= m.spikeWindow[0] && elapsed <= m.spikeWindow[1];
+          if (!sweet) {
+            spike = false;
+            kby = -2.5;          // sour hit pops them up weakly instead
+            dmg *= 0.6;
+          }
+        }
         return { x: hx, y: hy, w: hw, h: hh,
-                 damage: dmg, kbx: m.kbx, kby: m.kby, type: m.flavor,
-                 poison: m.poison, fueled: m.fueled };
+                 damage: dmg, kbx: m.kbx, kby: kby, type: m.flavor,
+                 poison: m.poison, fueled: m.fueled,
+                 spike, spikePower: m.spikePower, spikeStun: m.spikeStun };
       }
       return null;
     }
@@ -8803,6 +9049,13 @@
             atk.moveState = null;
             break;
           }
+          // Capture "the hit got negated" state BEFORE takeDamage consumes it.
+          // takeDamage returns true both when a hit lands and when it's parried
+          // or eaten by super armor, so the return value alone can't tell them
+          // apart — and a spike that still meteors through a successful parry
+          // would be maddening.
+          const negated = (def.parryWindow > 0 && atk !== def)      // parry
+                       || (def.armor > 0 && hb.damage <= 20);       // armor soak
           def.takeDamage(hb.damage, hb.kbx, hb.kby, atk);
           // Sound + hit-pause feedback. Pause scales with damage so heavies
           // get the meaty Smash-style freeze. Skip if a parry/sing already
@@ -8833,6 +9086,33 @@
           if (hb.uppercut) {
             def.helpless = true;
             spawnEffect(def.cx, def.cy, '#f0d050', 26, 36);
+          }
+          // SPIKE / METEOR SMASH — drive the victim sharply downward and burn
+          // one of their air options, which is what turns a spike into a kill
+          // offstage rather than just another hit. Only meteors an AIRBORNE
+          // victim: a grounded target is standing on the floor, so it resolves
+          // as the normal hit above (standard fighting-game convention).
+          if (hb.spike && !def.onGround && !def.blocking && !negated) {
+            const power = hb.spikePower || 12;
+            // Override the scaled knockback outright. A spike should feel the
+            // same at 0% as at 150% — its threat is position, not raw KB, and
+            // damage-scaled meteors get absurd at high percent.
+            def.vy = power;
+            def.knockback.y = power;
+            def.vx *= 0.5;              // kill horizontal drift so they go DOWN
+            def.knockback.x *= 0.5;
+            // Burn an air jump. Not all of them — that would make any spike an
+            // automatic kill; taking one leaves a skilled player a recovery.
+            def.jumps = Math.min(def.maxJumps, def.jumps + 1);
+            // Meteor stun: locked out of acting while falling. This is the
+            // window the attacker is actually buying with a sweetspot hit.
+            def.hitstun = Math.max(def.hitstun, hb.spikeStun || 18);
+            playSound('hitHeavy');
+            hitstopFrames = Math.max(hitstopFrames, 7);
+            shakeCamera(11);
+            spawnEffect(def.cx, def.cy, '#ffffff', 26, 30);
+            spawnEffect(def.cx, def.cy, '#ff4444', 32, 40);
+            spawnMeteorStreak(def.cx, def.cy);
           }
           // Sing: 60-frame stun lock that overrides the damage-based hitstun cap
           if (hb.stun) {
@@ -10237,6 +10517,37 @@
     consumeKeyLatch();
   }
 
+  // Spike reference data for the MOVESET KEY panel. Rather than hand-copying
+  // the numbers (which would silently drift the moment a spike is retuned),
+  // probe each character by actually running their dair through
+  // startAttack → applyAttackFlavor and reading the resulting moveState.
+  // Computed once and cached; the probe Fighters are thrown away immediately.
+  let _spikeInfoCache = null;
+  function getSpikeInfo() {
+    if (_spikeInfoCache) return _spikeInfoCache;
+    _spikeInfoCache = {};
+    // Aidan's dair rolls rng() for its randomized power. Snapshot and restore
+    // the seeded RNG so probing the panel can't perturb match determinism.
+    const savedRng = rngState;
+    for (const key of CHAR_KEYS) {
+      try {
+        const probe = new Fighter(key, 0, 1, 0);
+        probe.onGround = false;
+        probe.startAttack('dair');
+        const m = probe.moveState;
+        if (m && m.spike) {
+          const w = m.spikeWindow;
+          _spikeInfoCache[key] = {
+            power: Math.round(m.spikePower || 12),
+            window: w ? (w[1] - w[0] + 1) : 0,
+          };
+        }
+      } catch (e) { /* character just won't get a badge */ }
+    }
+    rngState = savedRng;
+    return _spikeInfoCache;
+  }
+
   // Per-character head accessory used in the character-select cards.
   // Drawn ABOVE / OVER the basic skin-tone head rectangle. (hx, hy) is the
   // top-left of the head box; (w, h) is its size. animT drives subtle bob
@@ -10675,10 +10986,13 @@
       // Reference panel showing every character's specials.
       ctx.fillStyle = '#ffeb3b';
       ctx.font = 'bold 28px sans-serif';
-      ctx.fillText('MOVESET KEY', W/2, 130);
+      ctx.fillText('MOVESET KEY', W/2, 126);
       ctx.fillStyle = '#888';
       ctx.font = '12px sans-serif';
-      ctx.fillText('Special button (G or /) + direction → fires the corresponding special.', W/2, 152);
+      ctx.fillText('Special button (G or /) + direction → fires the corresponding special.', W/2, 146);
+      ctx.fillStyle = '#ff8a3a';
+      ctx.font = '11px sans-serif';
+      ctx.fillText('▼ = down-air SPIKE: power / sweetspot frames. Hit the sweetspot midair to meteor them straight down.', W/2, 163);
 
       // Character rows
       ctx.textAlign = 'left';
@@ -10726,6 +11040,17 @@
         ctx.fillStyle = '#888';
         ctx.font = '10px sans-serif';
         ctx.fillText(ch.archetype, 56, ry + 26);
+        // Spike badge — power and sweetspot width for this character's dair.
+        // Colour-tiered so you can scan the roster for the heavy meteors.
+        const si = getSpikeInfo()[row.key];
+        if (si) {
+          ctx.fillStyle = si.power >= 16 ? '#ff4444' : si.power >= 13 ? '#ff8a3a' : '#ffd24a';
+          ctx.font = 'bold 11px sans-serif';
+          ctx.fillText('▼' + si.power, 158, ry + 12);
+          ctx.fillStyle = '#777';
+          ctx.font = '9px sans-serif';
+          ctx.fillText(si.window + 'f window', 158, ry + 24);
+        }
         // Moves
         ctx.fillStyle = '#ddd';
         ctx.font = '11px sans-serif';
