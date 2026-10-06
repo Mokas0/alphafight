@@ -979,6 +979,205 @@
     });
   }
 
+  // ---------- THE BAR: CURRENCY + ITEMS ----------
+  // Currency is "TABS" (as in a bar tab). Earned by fighting, spent at the bar
+  // on items that attach weird, deliberately lopsided effects to a fighter.
+  //
+  // DESIGN RULE: every item has a real upside AND a real cost. Nothing here is
+  // a plain stat stick — the fun is in the tradeoff, and a loadout should feel
+  // like a gamble you chose rather than a number that went up.
+  //
+  // DETERMINISM: every random item effect reads the seeded rng(), never
+  // Math.random(), because item effects run inside the lockstep simulation.
+  // Loadouts are also shipped to every peer in the lobby 'start' message so all
+  // clients simulate the same fighters. Math.random() or an unshared loadout
+  // would desync an online match instantly.
+  const BAR_STORAGE_KEY = 'alphafight_bar_v1';
+  const EQUIP_SLOTS = 2;        // how many items one fighter can carry
+
+  // Effect vocabulary (the `mods` object each item contributes to):
+  //   dmgOut/dmgIn      multiply damage dealt / taken
+  //   kbOut/kbIn        multiply knockback dealt / taken
+  //   speed/jump/grav   multiply walk+dash / jump power / gravity
+  //   extraJumps        additional midair jumps
+  //   extraStocks       additional lives
+  //   startDamage       damage you respawn at (staleness tax)
+  //   shieldRegen/maxShield  multiply shield regen rate / shield cap
+  //   cooldown          multiply attack cooldown + endlag (lower = faster)
+  //   hitstunIn         multiply hitstun suffered
+  //   crit              chance any landed hit becomes a 2x critical
+  //   reflect           chance an incoming projectile bounces back
+  //   backfire          chance your OWN projectile turns on you
+  //   spikeWindow       extra frames added to every spike sweetspot
+  //   fuelOnHit         your hits douse the target in fuel
+  //   selfBurn          self-damage every N frames
+  //   firstHit          multiplier on the first hit you land each stock
+  //   dodge             chance to phase behind an attacker instead of taking a hit
+  //   sticky            frames of endlag inflicted on whoever hits you
+  //   lastCall          bonus damage/speed while on your final stock
+  //   tabs              multiply tabs earned from the match
+  //   chaos             rolls a random other item's effect each stock
+  const ITEMS = {
+    courage:   { name: 'Shot of Courage',  cost: 120, icon: '🥃', color: '#ff8a3a',
+                 blurb: '+20% damage dealt, +20% damage taken.',
+                 flavor: 'Liquid confidence. No defensive value whatsoever.',
+                 mods: { dmgOut: 1.20, dmgIn: 1.20 } },
+    nachos:    { name: 'Greasy Nachos',    cost: 90,  icon: '🧀', color: '#ffd24a',
+                 blurb: 'Ice-slick footing: huge momentum, almost no grip.',
+                 flavor: 'The cheese gets everywhere. Including under you.',
+                 mods: { speed: 1.35, friction: 0.55, kbIn: 1.12 } },
+    mug:       { name: 'Bottomless Mug',   cost: 140, icon: '🍺', color: '#f0d050',
+                 blurb: 'Shield regenerates 4x faster but caps at half size.',
+                 flavor: 'Always full, never big.',
+                 mods: { shieldRegen: 4.0, maxShield: 0.5 } },
+    egg:       { name: 'Pickled Egg',      cost: 200, icon: '🥚', color: '#e8e0c0',
+                 blurb: '+1 stock, but every life starts at 30% damage.',
+                 flavor: "Nobody knows how long it's been in that jar.",
+                 mods: { extraStocks: 1, startDamage: 30 } },
+    wings:     { name: 'Hot Wings',        cost: 130, icon: '🔥', color: '#ff6a2a',
+                 blurb: 'Your hits douse foes in fuel. You take +25% damage.',
+                 flavor: 'Sauce on the knuckles. Regret in the gut.',
+                 mods: { fuelOnHit: true, dmgIn: 1.25 } },
+    balloon:   { name: 'Helium Balloon',   cost: 110, icon: '🎈', color: '#ff6abf',
+                 blurb: 'Half gravity, +1 air jump, but launched 50% further.',
+                 flavor: 'Floaty. Deeply, dangerously floaty.',
+                 mods: { grav: 0.5, extraJumps: 1, kbIn: 1.5 } },
+    boots:     { name: 'Lead Boots',       cost: 130, icon: '🥾', color: '#8a8a9a',
+                 blurb: 'Take 40% less knockback. Slower, and you jump lower.',
+                 flavor: 'Unbudgeable. Also unhurried.',
+                 mods: { kbIn: 0.6, speed: 0.78, jump: 0.85 } },
+    mystery:   { name: 'Mystery Shot',     cost: 160, icon: '❓', color: '#a04ade',
+                 blurb: 'Rolls a different random item effect every stock.',
+                 flavor: "The bartender won't say. The bartender never says.",
+                 mods: { chaos: true } },
+    caffeine:  { name: 'Caffeine Pills',   cost: 150, icon: '☕', color: '#8a5a3a',
+                 blurb: 'Attacks recover 35% faster, but hitstun lasts 45% longer.',
+                 flavor: 'Fast hands, glass jaw, no sleep.',
+                 mods: { cooldown: 0.65, hitstunIn: 1.45 } },
+    mirror:    { name: 'Bar Mirror',       cost: 170, icon: '🪞', color: '#a0e0d0',
+                 blurb: '30% chance to reflect projectiles — 12% to reflect your own.',
+                 flavor: 'Reflects more than you asked it to.',
+                 mods: { reflect: 0.30, backfire: 0.12 } },
+    coin:      { name: 'Lucky Coin',       cost: 180, icon: '🪙', color: '#ffe14a',
+                 blurb: '18% of your hits crit for double damage.',
+                 flavor: 'Someone else was unlucky with it first.',
+                 mods: { crit: 0.18 } },
+    olive:     { name: 'Cursed Olive',     cost: 150, icon: '🫒', color: '#5aaf3a',
+                 blurb: '+45% damage dealt. You bleed 4% every 6 seconds.',
+                 flavor: 'It blinked. You ate it anyway.',
+                 mods: { dmgOut: 1.45, selfBurn: 360, selfBurnAmt: 4 } },
+    ice:       { name: 'Phantom Ice',      cost: 190, icon: '🧊', color: '#88ddff',
+                 blurb: '28% chance a hit phases you behind the attacker instead.',
+                 flavor: "It doesn't melt. It relocates.",
+                 mods: { dodge: 0.28 } },
+    darts:     { name: 'Dizzy Darts',      cost: 140, icon: '🎯', color: '#c83030',
+                 blurb: 'Spike sweetspots +4 frames. Other aerials -25% damage.',
+                 flavor: 'All your aim went into one direction: down.',
+                 mods: { spikeWindow: 4, aerialDmg: 0.75 } },
+    stool:     { name: "Regular's Stool",  cost: 100, icon: '🪑', color: '#8a6a3a',
+                 blurb: '+60% tabs earned, but -12% damage dealt.',
+                 flavor: "It's got your shape worn into it.",
+                 mods: { tabs: 1.6, dmgOut: 0.88 } },
+    pepper:    { name: 'Ghost Pepper',     cost: 170, icon: '🌶️', color: '#ff4444',
+                 blurb: 'The first hit you land each stock does triple damage.',
+                 flavor: 'One bite. One chance. Then only tears.',
+                 mods: { firstHit: 3.0 } },
+    coaster:   { name: 'Sticky Coaster',   cost: 120, icon: '🟤', color: '#6a4a2a',
+                 blurb: 'Whoever hits you gets stuck in 14 frames of endlag.',
+                 flavor: 'It came free with the drink. It never left.',
+                 mods: { sticky: 14 } },
+    lastcall:  { name: 'Last Call',        cost: 210, icon: '🔔', color: '#ffeb3b',
+                 blurb: 'On your final stock: +55% damage, +25% speed.',
+                 flavor: 'You fight hardest when they start stacking chairs.',
+                 mods: { lastCall: true } },
+  };
+  const ITEM_KEYS = Object.keys(ITEMS);
+
+  // Persisted wallet + inventory. loadouts[slot] is an array of item keys of
+  // length <= EQUIP_SLOTS, one per player slot (0..3).
+  const bar = {
+    tabs: 0,
+    owned: {},                       // itemKey -> true
+    loadouts: [[], [], [], []],
+    lifetimeTabs: 0,
+  };
+
+  function loadBar() {
+    try {
+      const raw = localStorage.getItem(BAR_STORAGE_KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      bar.tabs = Math.max(0, d.tabs | 0);
+      bar.lifetimeTabs = Math.max(0, d.lifetimeTabs | 0);
+      bar.owned = {};
+      for (const k of Object.keys(d.owned || {})) if (ITEMS[k]) bar.owned[k] = true;
+      bar.loadouts = [[], [], [], []];
+      for (let s = 0; s < 4; s++) {
+        const L = (d.loadouts && d.loadouts[s]) || [];
+        // Only keep items that still exist and are actually owned — guards
+        // against a stale save referencing an item that was renamed or removed.
+        bar.loadouts[s] = L.filter(k => ITEMS[k] && bar.owned[k]).slice(0, EQUIP_SLOTS);
+      }
+    } catch (e) { console.warn('bar load failed', e); }
+  }
+  function saveBar() {
+    try { localStorage.setItem(BAR_STORAGE_KEY, JSON.stringify(bar)); }
+    catch (e) { console.warn('bar save failed', e); }
+  }
+
+  // Collapse a list of item keys into one additive/multiplicative mods object.
+  // Multipliers stack by multiplication, flat bonuses by addition, flags by OR,
+  // and chances by "independent rolls" (1 - product of misses) so two reflect
+  // sources can't exceed 100%.
+  function computeMods(itemKeys) {
+    const m = {
+      dmgOut: 1, dmgIn: 1, kbOut: 1, kbIn: 1, speed: 1, jump: 1, grav: 1,
+      friction: 1, shieldRegen: 1, maxShield: 1, cooldown: 1, hitstunIn: 1,
+      aerialDmg: 1, tabs: 1,
+      extraJumps: 0, extraStocks: 0, startDamage: 0, spikeWindow: 0, sticky: 0,
+      crit: 0, reflect: 0, backfire: 0, dodge: 0,
+      selfBurn: 0, selfBurnAmt: 0, firstHit: 1,
+      fuelOnHit: false, chaos: false, lastCall: false,
+    };
+    const MULT = ['dmgOut','dmgIn','kbOut','kbIn','speed','jump','grav','friction',
+                  'shieldRegen','maxShield','cooldown','hitstunIn','aerialDmg','tabs','firstHit'];
+    const ADD  = ['extraJumps','extraStocks','startDamage','spikeWindow','sticky','selfBurnAmt'];
+    const CHANCE = ['crit','reflect','backfire','dodge'];
+    for (const key of (itemKeys || [])) {
+      const it = ITEMS[key];
+      if (!it) continue;
+      for (const [k, v] of Object.entries(it.mods)) {
+        if (MULT.includes(k)) m[k] *= v;
+        else if (ADD.includes(k)) m[k] += v;
+        else if (CHANCE.includes(k)) m[k] = 1 - (1 - m[k]) * (1 - v);
+        else if (k === 'selfBurn') m.selfBurn = m.selfBurn ? Math.min(m.selfBurn, v) : v;
+        else m[k] = v || m[k];       // booleans
+      }
+    }
+    return m;
+  }
+
+  // Mystery Shot: pick one random item's mods and fold them in. Uses the seeded
+  // rng() so every client in an online match rolls the same shot.
+  function rollChaosMods(into) {
+    const pool = ITEM_KEYS.filter(k => !ITEMS[k].mods.chaos);
+    const pick = pool[Math.floor(rng() * pool.length)];
+    const rolled = computeMods([pick]);
+    for (const k of Object.keys(into)) {
+      if (typeof into[k] === 'number' && typeof rolled[k] === 'number') {
+        // Re-apply the rolled item's deviation from neutral on top of current.
+        if (['dmgOut','dmgIn','kbOut','kbIn','speed','jump','grav','friction',
+             'shieldRegen','maxShield','cooldown','hitstunIn','aerialDmg','tabs','firstHit'].includes(k)) {
+          into[k] *= rolled[k];
+        } else {
+          into[k] += rolled[k];
+        }
+      } else if (typeof rolled[k] === 'boolean' && rolled[k]) into[k] = true;
+    }
+    into.chaosPick = pick;
+    return pick;
+  }
+
   // ---------- CONTROL MAPS ----------
   // Slots 0 + 1 use the real keyboard schemes (local 2P uses both, online uses
   // only slot 0). Slots 2 + 3 use phantom keycodes that no real keyboard event
@@ -1348,10 +1547,18 @@
       this.facing = facing; // 1 right, -1 left
       this.onGround = false;
       this.jumps = 0;
-      this.maxJumps = (charKey === 'jonah') ? 5 : 2;
+      // Bar items are resolved here so every downstream system can just read
+      // this.mods. startMatch() passes the loadout in via `items`.
+      this.items = (arguments.length > 4 && arguments[4]) || [];
+      this.mods = computeMods(this.items);
+      if (this.mods.chaos) rollChaosMods(this.mods);
+      this.maxJumps = ((charKey === 'jonah') ? 5 : 2) + this.mods.extraJumps;
 
-      this.damage = 0; // SSB-style percent
-      this.stocks = 3;
+      this.damage = this.mods.startDamage; // SSB-style percent
+      this.stocks = 3 + this.mods.extraStocks;
+      this.firstHitUsed = false;   // Ghost Pepper: spent on the first hit per stock
+      this.lastHitBy = null;       // for KO attribution in the tabs payout
+      this.selfBurnTick = 0;       // Cursed Olive countdown
       this.hitstun = 0;
       this.knockback = { x: 0, y: 0 };
       this.blocking = false;
@@ -1361,8 +1568,8 @@
       // blocking (and additionally drains from absorbed hits), regenerates when
       // not blocking. If it hits 0, the shield "breaks" and the fighter is
       // stunned for shieldBroken frames; they can't block until it refills.
-      this.shield = 100;
-      this.maxShield = 100;
+      this.maxShield = 100 * this.mods.maxShield;
+      this.shield = this.maxShield;
       this.shieldBroken = 0;
       this.poisonTimer = 0;  // frames of poison remaining
       this.poisonTick = 0;   // counter for DoT cadence
@@ -1460,6 +1667,26 @@
       this.fueled = Math.max(this.fueled, frames);
     }
 
+    // ---- Bar-item helpers ----
+    // Last Call only switches on when this is the fighter's final stock, so
+    // these have to be computed live rather than baked in at construction.
+    onLastStock() { return this.stocks <= 1; }
+    speedMult() {
+      return this.mods.speed * (this.mods.lastCall && this.onLastStock() ? 1.25 : 1);
+    }
+    dmgOutMult() {
+      return this.mods.dmgOut * (this.mods.lastCall && this.onLastStock() ? 1.55 : 1);
+    }
+    // Ghost Pepper's first-hit bonus, consumed once per stock. Returns the
+    // multiplier to apply and marks it spent.
+    consumeFirstHit() {
+      if (this.mods.firstHit <= 1 || this.firstHitUsed) return 1;
+      this.firstHitUsed = true;
+      spawnEffect(this.cx, this.cy, '#ff4444', 28, 40);
+      spawnEffect(this.cx, this.cy, '#ffeb3b', 22, 32);
+      return this.mods.firstHit;
+    }
+
     takeDamage(amount, kbx, kby, attacker) {
       if (this.invuln > 0) return false;
       // PARRY — if the player JUST released block (within parryWindow), any
@@ -1470,6 +1697,28 @@
         this.parryWindow = 0;
         triggerParry(this, attacker);
         return true;
+      }
+      // PHANTOM ICE — roll to phase through the hit entirely, reappearing on
+      // the far side of the attacker. Checked before damage so a successful
+      // dodge costs nothing. Seeded rng() keeps this lockstep-safe.
+      if (this.mods.dodge > 0 && attacker && attacker !== this && rng() < this.mods.dodge) {
+        const side = (attacker.cx > this.cx) ? 1 : -1;   // step past them
+        this.x = Math.max(BLAST_LEFT + 10,
+                 Math.min(BLAST_RIGHT - this.w - 10, attacker.x + side * (attacker.w + 8)));
+        this.facing = -side;
+        this.invuln = Math.max(this.invuln, 14);
+        this.vx *= 0.3;
+        spawnEffect(this.cx, this.cy, '#88ddff', 26, 34);
+        spawnEffect(this.cx, this.cy, '#ffffff', 18, 24);
+        playSound('block');
+        return true;
+      }
+      // STICKY COASTER — anyone who connects with us eats endlag for it. Fires
+      // even when the hit is otherwise absorbed below (armor/shield), because
+      // the coaster is on US, not on the hit.
+      if (this.mods.sticky > 0 && attacker && attacker !== this) {
+        attacker.endlag = Math.max(attacker.endlag, this.mods.sticky);
+        spawnEffect(attacker.cx, attacker.cy + 10, '#6a4a2a', 16, 18);
       }
       // SUPER ARMOR (Update 1.1) — heavy commit moves grant armor on their
       // windup / drop. Light hits bounce off; a hit > 20 dmg breaks the armor
@@ -1497,9 +1746,9 @@
       // can't block until it refills. Encourages active play vs turtling.
       if (this.blocking) {
         this.shield -= 8 + amount * 1.5;
-        this.damage += amount * 0.2;
-        this.knockback.x = kbx * 0.3;
-        this.knockback.y = kby * 0.3;
+        this.damage += amount * 0.2 * this.mods.dmgIn;
+        this.knockback.x = kbx * 0.3 * this.mods.kbIn;
+        this.knockback.y = kby * 0.3 * this.mods.kbIn;
         this.hitstun = 8;
         if (this.shield <= 0) {
           // SHIELD BREAK — long stun, knocked vulnerable
@@ -1518,7 +1767,14 @@
         }
         return true;
       }
+      // Bar items scale incoming damage (Shot of Courage, Hot Wings) before it
+      // lands, so knockback — which scales off accumulated damage — compounds
+      // naturally rather than needing a second multiplier.
+      amount *= this.mods.dmgIn;
       this.damage += amount;
+      // Remember the last fighter to connect, so whoever knocks us off the
+      // stage gets credited with the KO in the tabs payout.
+      if (attacker && attacker !== this) this.lastHitBy = attacker;
       // Angus gains "code" from taking damage — 2 code per damage point, capped.
       if (this.key === 'angus') {
         this.code = Math.min(this.maxCode, this.code + amount * 2);
@@ -1526,11 +1782,11 @@
       }
       // knockback scales with damage (SSB-style)
       const scale = 1 + this.damage / 60;
-      this.knockback.x = kbx * scale / this.def.weight;
-      this.knockback.y = kby * scale / this.def.weight;
+      this.knockback.x = kbx * scale / this.def.weight * this.mods.kbIn;
+      this.knockback.y = kby * scale / this.def.weight * this.mods.kbIn;
       this.vx = this.knockback.x;
       this.vy = this.knockback.y;
-      this.hitstun = Math.min(45, 12 + this.damage * 0.2);
+      this.hitstun = Math.min(45, 12 + this.damage * 0.2) * this.mods.hitstunIn;
       // Getting hit breaks helpless state and endlag
       this.helpless = false;
       this.endlag = 0;
@@ -1585,17 +1841,20 @@
       if (!this.moveState && !this.blocking) {
         // While helpless: allow slow air drift only, no jumps, no fast-fall
         if (this.helpless) {
-          const drift = this.def.walkSpeed * 0.5;
+          const drift = this.def.walkSpeed * 0.5 * this.speedMult();
           if (left && !right) { this.vx = Math.max(this.vx - 0.3, -drift); this.facing = -1; }
           else if (right && !left) { this.vx = Math.min(this.vx + 0.3, drift); this.facing = 1; }
         } else {
-          if (left && !right) { this.vx = -this.def.walkSpeed; this.facing = -1; }
-          else if (right && !left) { this.vx = this.def.walkSpeed; this.facing = 1; }
-          else if (this.onGround) { this.vx *= 0.6; }
+          // Bar items scale walk speed, ground friction (Greasy Nachos makes
+          // the floor slick) and jump height.
+          const walk = this.def.walkSpeed * this.speedMult();
+          if (left && !right) { this.vx = -walk; this.facing = -1; }
+          else if (right && !left) { this.vx = walk; this.facing = 1; }
+          else if (this.onGround) { this.vx *= 1 - (1 - 0.6) * this.mods.friction; }
 
           // Jump (edge detect against the captured prevUp)
           if (up && !prevUp && this.jumps < this.maxJumps) {
-            this.vy = -this.def.jumpPower;
+            this.vy = -this.def.jumpPower * this.mods.jump;
             this.jumps++;
             this.onGround = false;
             spawnEffect(this.cx, this.y + this.h, '#ffffff', 10, 14);
@@ -3003,7 +3262,23 @@
           this.moveState = null;
         }
       }
-      if (this.attackCooldown > 0) this.attackCooldown--;
+      // CAFFEINE PILLS scale how fast attack recovery burns off. Scaling the
+      // decrement rate (rather than every single assignment site) covers all
+      // the places cooldown/endlag get set. Fractional counters are fine —
+      // everything downstream only tests `> 0`.
+      const recoverRate = 1 / this.mods.cooldown;
+      if (this.attackCooldown > 0) this.attackCooldown -= recoverRate;
+      // CURSED OLIVE — pays for its damage bonus in your own health, on a
+      // fixed timer. Doesn't tick while dead/respawning.
+      if (this.mods.selfBurn > 0 && this.stocks > 0 && this.respawnTimer <= 0) {
+        this.selfBurnTick++;
+        if (this.selfBurnTick >= this.mods.selfBurn) {
+          this.selfBurnTick = 0;
+          this.damage += this.mods.selfBurnAmt;
+          spawnEffect(this.cx, this.cy, '#5aaf3a', 22, 28);
+          spawnEffect(this.cx, this.cy, '#b6ff6a', 16, 20);
+        }
+      }
       if (this.invuln > 0) this.invuln--;
       if (this.armor > 0) this.armor--;
       if (this.counterActive > 0) this.counterActive--;
@@ -3026,9 +3301,9 @@
       } else if (this.shieldBroken > 0) {
         this.shieldBroken--;
       } else if (this.shield < this.maxShield) {
-        this.shield = Math.min(this.maxShield, this.shield + 0.4);
+        this.shield = Math.min(this.maxShield, this.shield + 0.4 * this.mods.shieldRegen);
       }
-      if (this.endlag > 0) this.endlag--;
+      if (this.endlag > 0) this.endlag -= recoverRate;
 
       // Animation tick + air/ground bookkeeping (drives idle bob, jump stretch, etc.)
       this.animTick++;
@@ -3110,7 +3385,8 @@
       }
 
       // Gravity — Jonah falls much slower (floaty)
-      const gravity = (this.key === 'jonah') ? 0.30 : 0.65;
+      // Bar items scale gravity (Helium Balloon halves it).
+      const gravity = ((this.key === 'jonah') ? 0.30 : 0.65) * this.mods.grav;
       const terminalVy = (this.key === 'jonah') ? 7 : 14;
       this.vy += gravity;
       if (this.vy > terminalVy) this.vy = terminalVy;
@@ -3728,7 +4004,27 @@
 
     die() {
       this.stocks--;
-      this.damage = 0;
+      // Tabs: credit a KO to the local player if they landed the last hit.
+      // Self-destructs (nobody hit you) credit nobody.
+      if (this.lastHitBy && this.lastHitBy !== this
+          && this.lastHitBy.index === localSlotIndex()) matchEarn.kos++;
+      this.lastHitBy = null;
+      // PICKLED EGG makes every life start pre-damaged rather than clean.
+      this.damage = this.mods.startDamage;
+      // Per-stock bar-item state resets on death: Ghost Pepper reloads its
+      // first-hit bonus, Cursed Olive restarts its burn clock, and Mystery
+      // Shot re-rolls into a different effect for the new life.
+      this.firstHitUsed = false;
+      this.selfBurnTick = 0;
+      if (this.mods.chaos && this.stocks > 0) {
+        this.mods = computeMods(this.items);
+        rollChaosMods(this.mods);
+        this.maxJumps = ((this.key === 'jonah') ? 5 : 2) + this.mods.extraJumps;
+        this.maxShield = 100 * this.mods.maxShield;
+        this.shield = this.maxShield;
+        this.damage = this.mods.startDamage;
+        spawnEffect(this.cx, this.cy, '#a04ade', 30, 40);
+      }
       this.poisonTimer = 0;
       this.poisonTick = 0;
       this.virusTimer = 0;
@@ -4074,13 +4370,20 @@
         let spike = !!m.spike;
         let kby = m.kby;
         if (spike && m.spikeWindow) {
-          const sweet = elapsed >= m.spikeWindow[0] && elapsed <= m.spikeWindow[1];
+          // DIZZY DARTS widens the sweetspot by mods.spikeWindow frames, but
+          // clamped to the move's active window — a sweetspot can never extend
+          // past the frames the hitbox actually exists on.
+          const sweetEnd = Math.min(m.active[1], m.spikeWindow[1] + this.mods.spikeWindow);
+          const sweet = elapsed >= m.spikeWindow[0] && elapsed <= sweetEnd;
           if (!sweet) {
             spike = false;
             kby = -2.5;          // sour hit pops them up weakly instead
             dmg *= 0.6;
           }
         }
+        // DIZZY DARTS tax: all your non-spike aerials hit softer.
+        const isAerial = ['atk_nair','atk_fair','atk_bair','atk_uair'].includes(t);
+        if (isAerial) dmg *= this.mods.aerialDmg;
         return { x: hx, y: hy, w: hw, h: hh,
                  damage: dmg, kbx: m.kbx, kby: kby, type: m.flavor,
                  poison: m.poison, fueled: m.fueled,
@@ -7666,7 +7969,7 @@
     net.localSlot = 0;
     net.seed = (Math.random() * 0x7fffffff) | 0;
     net.slots = emptySlots();
-    net.slots[0] = { char: localChar, ready: false, occupied: true };
+    net.slots[0] = { char: localChar, ready: false, occupied: true, items: bar.loadouts[0] || [] };
     net.statusText = 'creating room...';
     net.error = '';
     const code = 'ab-' + generateRoomCode().toLowerCase();
@@ -7694,7 +7997,7 @@
       const slotIdx = assigned;
       conn.on('open', () => {
         net.conns[slotIdx] = conn;
-        net.slots[slotIdx] = { char: CHAR_KEYS[0], ready: false, occupied: true };
+        net.slots[slotIdx] = { char: CHAR_KEYS[0], ready: false, occupied: true, items: [] };
         net.everConnected = true;
         // Host's `net.connected` = "at least one guest currently in the room."
         // Required for the connection-loss bail-out (everConnected && !connected
@@ -7743,7 +8046,7 @@
         net.connected = true;
         net.everConnected = true;
         net.statusText = 'connected, joining lobby...';
-        try { conn.send({ t: 'pick', char: localChar }); } catch (e) {}
+        try { conn.send({ t: 'pick', char: localChar, items: bar.loadouts[net.localSlot >= 0 ? net.localSlot : 1] || [] }); } catch (e) {}
       });
       conn.on('data', msg => handleNetMsg(msg, 0));   // 0 = "from host"
       conn.on('close', () => {
@@ -7768,7 +8071,8 @@
       net.seed = msg.seed;
       if (msg.stage && STAGES[msg.stage]) currentStage = msg.stage;
       // Pre-fill our own slot so we render in the lobby immediately.
-      net.slots[net.localSlot] = { char: CHAR_KEYS[menuSel[0]], ready: false, occupied: true };
+      net.slots[net.localSlot] = { char: CHAR_KEYS[menuSel[0]], ready: false, occupied: true,
+                                   items: bar.loadouts[net.localSlot] || [] };
       net.statusText = `joined as slot ${net.localSlot + 1}`;
     } else if (msg.t === 'lobby') {
       // Guest receives full lobby state from host.
@@ -7778,8 +8082,15 @@
       net.error = 'room full';
       net.statusText = 'room full (max 4 players)';
     } else if (msg.t === 'pick') {
-      // Host receives a character pick from a guest.
-      if (net.slots[fromSlot]) net.slots[fromSlot].char = msg.char;
+      // Host receives a character pick from a guest. The pick carries the
+      // guest's bar loadout too: item effects run inside the lockstep sim,
+      // so the host has to know them to include in the 'start' broadcast.
+      if (net.slots[fromSlot]) {
+        net.slots[fromSlot].char = msg.char;
+        if (Array.isArray(msg.items)) {
+          net.slots[fromSlot].items = msg.items.filter(k => ITEMS[k]).slice(0, EQUIP_SLOTS);
+        }
+      }
       broadcastLobby();
     } else if (msg.t === 'ready') {
       // Host receives a ready-toggle from a guest.
@@ -7956,11 +8267,17 @@
     // Online (when net.slots is populated): use the slot/char data from the
     //   lobby; one fighter per occupied slot.
     // Otherwise (local 2P or any legacy code path): fall back to menuSel[0..1].
-    let slotChars;
+    let slotChars, slotItems;
     if (net.mode !== 'local' && net.slots) {
-      slotChars = net.slots.filter(s => s && s.char).map(s => s.char);
+      const occupied = net.slots.filter(s => s && s.char);
+      slotChars = occupied.map(s => s.char);
+      // Loadouts travel with the lobby state so every client builds identical
+      // fighters — item effects run inside the lockstep sim, so a loadout that
+      // only one peer knows about would desync immediately.
+      slotItems = occupied.map(s => s.items || []);
     } else {
       slotChars = [CHAR_KEYS[menuSel[0]], CHAR_KEYS[menuSel[1]]];
+      slotItems = [bar.loadouts[0] || [], bar.loadouts[1] || []];
     }
     const N = Math.max(2, Math.min(MAX_PLAYERS, slotChars.length));
     // Evenly spaced spawn positions across the stage view. Facing alternates so
@@ -7969,12 +8286,44 @@
     for (let i = 0; i < N; i++) {
       const fracX = (i + 1) / (N + 1);                // 1/3, 2/3 for 2P; 1/4, 2/4, 3/4 for 3P; etc.
       const facing = (i < N / 2) ? 1 : -1;
-      fighters.push(new Fighter(slotChars[i] || CHAR_KEYS[0], W * fracX, facing, i));
+      fighters.push(new Fighter(slotChars[i] || CHAR_KEYS[0], W * fracX, facing, i,
+                                (slotItems && slotItems[i]) || []));
     }
     for (const f of fighters) f.invuln = 60;
     winner = null;
+    // Reset the per-match tabs ledger (see awardTabs).
+    matchEarn = { dmg: 0, kos: 0, paid: false };
     state = STATE.PLAY;
   }
+
+  // ---------- TABS PAYOUT ----------
+  // Tabs are earned by doing things, not by idling: damage dealt, KOs landed,
+  // and a win bonus. Tracked for the LOCAL player only (slot 0 locally, or
+  // net.localSlot online) — this is a single-player wallet, so paying out for
+  // every fighter on screen would mint tabs from a 4-player free-for-all.
+  let matchEarn = { dmg: 0, kos: 0, paid: false };
+
+  function localSlotIndex() {
+    if (net.mode === 'local') return 0;
+    return net.localSlot >= 0 ? net.localSlot : 0;
+  }
+
+  function awardTabs(didWin) {
+    if (matchEarn.paid) return 0;          // guard: OVER state can re-enter
+    matchEarn.paid = true;
+    const me = fighters[localSlotIndex()];
+    const mult = me ? me.mods.tabs : 1;    // Regular's Stool
+    const dmgTabs = Math.floor(matchEarn.dmg * 0.45);
+    const koTabs  = matchEarn.kos * 25;
+    const winTabs = didWin ? 70 : 0;
+    const total = Math.max(0, Math.round((dmgTabs + koTabs + winTabs) * mult));
+    bar.tabs += total;
+    bar.lifetimeTabs += total;
+    saveBar();
+    lastPayout = { dmg: dmgTabs, ko: koTabs, win: winTabs, mult, total };
+    return total;
+  }
+  let lastPayout = null;
 
   // ---------- STAGE-SPECIFIC PER-FRAME HOOKS ----------
   function stepStageHook() {
@@ -8375,6 +8724,51 @@
             spawnEffect(w.x + w.w/2, p.y + p.h/2, '#ffffff', 12, 16);
             break;
           }
+        }
+      }
+
+      // BAR MIRROR — a fighter carrying the mirror gets a roll to bounce any
+      // incoming shot back at whoever fired it. The same item also has a
+      // smaller BACKFIRE roll that turns the owner's OWN passing shot against
+      // them, which is the weird half of the tradeoff.
+      //
+      // Reuses the firewall's exclusion list (area/pickup/stationary types
+      // aren't reflectable) and its `reflected` latch so a shot can't ping-pong
+      // forever between two mirrors. Rolls read the seeded rng() for lockstep.
+      if (p.type !== 'firewall' && p.type !== 'firePatch' && p.type !== 'gasolinePuddle'
+          && p.type !== 'poisonCloud' && p.type !== 'iceFloor' && p.type !== 'skiPolePickup'
+          && p.type !== 'flashHit' && p.type !== 'eightBallSet' && p.type !== 'avalancheMarker'
+          && !p.reflected) {
+        for (const f of fighters) {
+          if (f.respawnTimer > 0 || f.stocks <= 0) continue;
+          const isOwner = (f === p.owner);
+          const chance = isOwner ? f.mods.backfire : f.mods.reflect;
+          if (chance <= 0) continue;
+          if (!(p.x + p.w > f.x && p.x < f.x + f.w && p.y + p.h > f.y && p.y < f.y + f.h)) continue;
+          if (rng() >= chance) continue;
+          if (isOwner) {
+            // BACKFIRE. The normal projectile loop skips its own owner, so
+            // flipping velocity here would do nothing — resolve the hit
+            // directly and consume the shot instead. Attacker is passed as
+            // null so this reads as an accident, not as someone's combo
+            // (it can't be parried or countered).
+            f.takeDamage(Math.max(2, (p.damage || 6) * 0.75), -p.vx * 0.5, -4, null);
+            p.life = 0;
+            spawnEffect(f.cx, f.cy, '#ff4444', 26, 32);
+            spawnEffect(f.cx, f.cy, '#ffffff', 18, 22);
+            playSound('hitMedium');
+          } else {
+            // Reflect: flip it and hand ownership to the mirror holder so it
+            // can hit whoever fired it.
+            p.vx = -p.vx;
+            p.vy *= 0.6;
+            p.reflected = true;
+            p.owner = f;
+            spawnEffect(f.cx, f.cy, '#a0e0d0', 22, 28);
+            spawnEffect(f.cx, f.cy, '#ffffff', 16, 20);
+            playSound('block');
+          }
+          break;
         }
       }
 
@@ -9056,7 +9450,34 @@
           // would be maddening.
           const negated = (def.parryWindow > 0 && atk !== def)      // parry
                        || (def.armor > 0 && hb.damage <= 20);       // armor soak
+          // ---- BAR ITEM offensive mods ----
+          // Applied here rather than in getHitbox so SPECIALS get them too
+          // (specials build their own hitboxes in a dozen places). Mutating
+          // hb is safe: getHitbox returns a fresh object each call.
+          if (!hb.grab) {
+            let outMult = atk.dmgOutMult();
+            outMult *= atk.consumeFirstHit();              // Ghost Pepper
+            let kbMult = atk.mods.kbOut;
+            // LUCKY COIN — seeded roll so online stays in lockstep.
+            if (atk.mods.crit > 0 && rng() < atk.mods.crit) {
+              outMult *= 2; kbMult *= 1.5;
+              spawnEffect(def.cx, def.cy, '#ffe14a', 30, 44);
+              spawnEffect(def.cx, def.cy, '#ffffff', 22, 34);
+              shakeCamera(10);
+            }
+            hb.damage *= outMult;
+            hb.kbx *= kbMult;
+            hb.kby *= kbMult;
+          }
+          const dmgBefore = def.damage;
           def.takeDamage(hb.damage, hb.kbx, hb.kby, atk);
+          // Credit the local player's dealt damage toward the tabs payout.
+          if (atk.index === localSlotIndex()) matchEarn.dmg += Math.max(0, def.damage - dmgBefore);
+          // HOT WINGS — every connecting hit douses the target in fuel.
+          if (atk.mods.fuelOnHit && !negated && !hb.grab && def.applyFuel) {
+            def.applyFuel(240);
+            spawnEffect(def.cx, def.cy, '#5a4028', 20, 26);
+          }
           // Sound + hit-pause feedback. Pause scales with damage so heavies
           // get the meaty Smash-style freeze. Skip if a parry/sing already
           // populated hitstop (don't double-add).
@@ -10298,6 +10719,20 @@
       ctx.fillStyle = f.def.color;
       ctx.font = 'bold 14px sans-serif';
       ctx.fillText(`P${i+1}  ${f.def.name}`, baseX + 10, y + 18);
+      // Bar items in play — icons above the panel, so you can see at a glance
+      // what weirdness each fighter is carrying. Mystery Shot shows what it
+      // actually rolled into this stock rather than its own '?' icon.
+      if (f.items && f.items.length) {
+        ctx.font = '13px sans-serif';
+        let ix = baseX + 10;
+        for (const k of f.items) {
+          const it = ITEMS[k];
+          if (!it) continue;
+          const rolled = (it.mods.chaos && f.mods.chaosPick) ? ITEMS[f.mods.chaosPick] : null;
+          ctx.fillText(rolled ? (it.icon + rolled.icon) : it.icon, ix, y - 4);
+          ix += rolled ? 30 : 18;
+        }
+      }
 
       // damage %
       const dmg = Math.floor(f.damage);
@@ -10306,12 +10741,17 @@
       ctx.font = 'bold 22px sans-serif';
       ctx.fillText(`${dmg}%`, baseX + 10, y + 46);
 
-      // stocks — three pips anchored to the panel's right edge.
-      const stockBaseX = baseX + PW - 80;
-      for (let s = 0; s < 3; s++) {
+      // Stock pips, anchored to the panel's right edge. Pip COUNT follows the
+      // fighter's actual starting stocks rather than a hard-coded 3, so bar
+      // items that grant extra lives (Pickled Egg) aren't invisible. Spacing
+      // tightens when there are more than 3 so they still fit the panel.
+      const maxStocks = 3 + (f.mods ? f.mods.extraStocks : 0);
+      const pipGap = maxStocks > 3 ? 15 : 20;
+      const stockBaseX = baseX + PW - 80 - (maxStocks > 3 ? (maxStocks - 3) * pipGap : 0);
+      for (let s = 0; s < maxStocks; s++) {
         ctx.fillStyle = s < f.stocks ? f.def.color : '#333';
         ctx.beginPath();
-        ctx.arc(stockBaseX + s * 20, y + 40, 6, 0, Math.PI*2);
+        ctx.arc(stockBaseX + s * pipGap, y + 40, maxStocks > 3 ? 5 : 6, 0, Math.PI*2);
         ctx.fill();
       }
 
@@ -10371,11 +10811,16 @@
 
   // ---------- MENU ----------
   let menuPrevKeys = {};
-  let menuStage = 'mode';      // 'mode' | 'code' | 'stadium' | 'chars' | 'movesets'
-  let menuModeIdx = 0;          // 0=LOCAL, 1=HOST, 2=JOIN, 3=MOVESETS
+  let menuStage = 'mode';      // 'mode' | 'code' | 'stadium' | 'chars' | 'movesets' | 'bar'
+  let menuModeIdx = 0;          // index into MODE_LABELS
   let menuStadiumIdx = 0;       // index into STAGE_KEYS
   let joinCodeInput = '';
-  const MODE_LABELS = ['LOCAL 2P', 'HOST PARTY', 'JOIN PARTY', 'MOVESET KEY', 'SPRITES'];
+  const MODE_LABELS = ['LOCAL 2P', 'HOST PARTY', 'JOIN PARTY', 'MOVESET KEY', 'SPRITES', 'THE BAR'];
+  // Bar screen cursor state.
+  let barIdx = 0;               // which item is highlighted
+  let barPlayer = 0;            // which player slot we're equipping (local 2P: 0/1)
+  let barMsg = '';              // transient feedback line ("bought!", "too broke")
+  let barMsgTimer = 0;
   const ROOM_ALPHABET = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
 
   function updateMenu() {
@@ -10406,9 +10851,13 @@
         } else if (menuModeIdx === 3) {
           // MOVESET KEY — open the moveset reference panel.
           menuStage = 'movesets';
-        } else {
+        } else if (menuModeIdx === 4) {
           // SPRITES — open the user-upload pixel-sprite manager (HTML overlay).
           openSpriteManager();
+        } else {
+          // THE BAR — buy and equip items.
+          menuStage = 'bar';
+          barMsg = '';
         }
       }
     } else if (menuStage === 'stadium') {
@@ -10429,6 +10878,50 @@
       if (tap(c0.block) || tap('Escape')) {
         menuStage = 'mode';
       }
+    } else if (menuStage === 'bar') {
+      // THE BAR. Grid navigation; SPECIAL buys-or-equips; ATTACK unequips;
+      // UP/DOWN switches which player you're outfitting; BLOCK/ESC exits.
+      const COLS = 4;
+      if (tap(c0.left))  barIdx = (barIdx + ITEM_KEYS.length - 1) % ITEM_KEYS.length;
+      if (tap(c0.right)) barIdx = (barIdx + 1) % ITEM_KEYS.length;
+      if (tap(c0.up))    barIdx = (barIdx + ITEM_KEYS.length - COLS) % ITEM_KEYS.length;
+      if (tap(c0.down))  barIdx = (barIdx + COLS) % ITEM_KEYS.length;
+      // Only local 2P needs a second loadout; online you only own your own slot.
+      if (tap('Tab')) barPlayer = (net.mode === 'local') ? (barPlayer ^ 1) : barPlayer;
+      const key = ITEM_KEYS[barIdx];
+      const item = ITEMS[key];
+      const slot = (net.mode === 'local') ? barPlayer : localSlotIndex();
+      const load = bar.loadouts[slot];
+      const setMsg = (t) => { barMsg = t; barMsgTimer = 150; };
+
+      if (tap(c0.special)) {
+        if (!bar.owned[key]) {
+          // Buy it.
+          if (bar.tabs >= item.cost) {
+            bar.tabs -= item.cost;
+            bar.owned[key] = true;
+            saveBar();
+            setMsg('Bought ' + item.name + '!');
+            playSound('menuBlip');
+          } else {
+            setMsg('Not enough tabs — need ' + (item.cost - bar.tabs) + ' more.');
+          }
+        } else if (load.includes(key)) {
+          setMsg(item.name + ' already equipped on P' + (slot + 1) + '.');
+        } else if (load.length >= EQUIP_SLOTS) {
+          setMsg('P' + (slot + 1) + ' slots full — unequip something first (F).');
+        } else {
+          load.push(key);
+          saveBar();
+          setMsg('Equipped to P' + (slot + 1) + '.');
+        }
+      }
+      if (tap(c0.attack)) {
+        const at = load.indexOf(key);
+        if (at >= 0) { load.splice(at, 1); saveBar(); setMsg('Unequipped from P' + (slot + 1) + '.'); }
+      }
+      if (tap(c0.block) || tap('Escape')) menuStage = 'mode';
+      if (barMsgTimer > 0) barMsgTimer--; else barMsg = '';
     } else if (menuStage === 'code') {
       // Cancel back to mode select with block
       if (tap(c0.block)) {
@@ -10482,7 +10975,7 @@
             menuSel[0] = idx;
             if (net.mode === 'host') broadcastLobby();
             else if (net.connected && net.hostConn) {
-              try { net.hostConn.send({ t: 'pick', char: me.char }); } catch (e) {}
+              try { net.hostConn.send({ t: 'pick', char: me.char, items: bar.loadouts[net.localSlot >= 0 ? net.localSlot : 1] || [] }); } catch (e) {}
             }
           }
           if (tap(ctrl.special)) {
@@ -10982,6 +11475,100 @@
       return;
     }
 
+    if (menuStage === 'bar') {
+      // ---- THE BAR ----
+      // Laid out to sit UNDER the shared "ALPHA BRAWL" title the menu draws
+      // above, in a 4x5 grid that leaves room for the footer at the bottom.
+      ctx.textAlign = 'center';
+      const slot = (net.mode === 'local') ? barPlayer : localSlotIndex();
+      const load = bar.loadouts[slot] || [];
+
+      ctx.fillStyle = '#ffd24a';
+      ctx.font = 'bold 20px sans-serif';
+      ctx.fillText('THE BAR', W / 2 - 110, 120);
+      ctx.fillStyle = '#ffe14a';
+      ctx.font = 'bold 18px sans-serif';
+      ctx.fillText(bar.tabs + ' TABS', W / 2 + 70, 120);
+
+      ctx.font = '12px sans-serif';
+      ctx.fillStyle = '#aaa';
+      const names = load.length
+        ? load.map(k => ITEMS[k].icon + ' ' + ITEMS[k].name).join('   +   ')
+        : '(nothing equipped)';
+      ctx.fillText('P' + (slot + 1) + ' loadout [' + load.length + '/' + EQUIP_SLOTS + ']:  ' + names, W / 2, 140);
+
+      // Item grid — 4 columns.
+      const COLS = 4, cardW = 224, cardH = 58, gx = 8, gy = 6;
+      const gridW = COLS * cardW + (COLS - 1) * gx;
+      const gx0 = W / 2 - gridW / 2;
+      const gy0 = 152;
+      ctx.textAlign = 'left';
+      for (let i = 0; i < ITEM_KEYS.length; i++) {
+        const key = ITEM_KEYS[i];
+        const it = ITEMS[key];
+        const x = gx0 + (i % COLS) * (cardW + gx);
+        const y = gy0 + ((i / COLS) | 0) * (cardH + gy);
+        const owned = !!bar.owned[key];
+        const equipped = load.includes(key);
+        const sel = i === barIdx;
+        const affordable = bar.tabs >= it.cost;
+
+        ctx.fillStyle = equipped ? '#1b2a1b' : (owned ? '#20202e' : '#17171f');
+        ctx.fillRect(x, y, cardW, cardH);
+        ctx.strokeStyle = sel ? '#ffeb3b' : (equipped ? '#5aaf3a' : (owned ? it.color : '#33333f'));
+        ctx.lineWidth = sel ? 3 : 1.5;
+        ctx.strokeRect(x, y, cardW, cardH);
+
+        ctx.font = '15px sans-serif';
+        ctx.fillStyle = '#fff';
+        ctx.fillText(it.icon, x + 6, y + 19);
+
+        ctx.font = 'bold 11px sans-serif';
+        ctx.fillStyle = owned ? it.color : (affordable ? '#ccc' : '#666');
+        ctx.fillText(it.name, x + 28, y + 17);
+
+        // Status chip, right-aligned on the title row.
+        ctx.textAlign = 'right';
+        ctx.font = 'bold 9px sans-serif';
+        if (equipped) { ctx.fillStyle = '#aaff6a'; ctx.fillText('EQUIPPED', x + cardW - 6, y + 17); }
+        else if (owned) { ctx.fillStyle = '#4ab8ff'; ctx.fillText('OWNED', x + cardW - 6, y + 17); }
+        else { ctx.fillStyle = affordable ? '#ffe14a' : '#a34040'; ctx.fillText(it.cost, x + cardW - 6, y + 17); }
+        ctx.textAlign = 'left';
+
+        // Blurb — the mechanical effect, word-wrapped into the card.
+        ctx.font = '9px sans-serif';
+        ctx.fillStyle = owned ? '#9a9aaa' : (affordable ? '#80808e' : '#55555e');
+        let line = '', ly = y + 31;
+        for (const w of it.blurb.split(' ')) {
+          if (ctx.measureText(line + w).width > cardW - 14) {
+            ctx.fillText(line, x + 7, ly); line = w + ' '; ly += 10;
+            if (ly > y + cardH - 3) { line = ''; break; }
+          } else line += w + ' ';
+        }
+        if (line) ctx.fillText(line, x + 7, ly);
+      }
+
+      // Detail strip for the highlighted item.
+      const selItem = ITEMS[ITEM_KEYS[barIdx]];
+      ctx.textAlign = 'center';
+      ctx.fillStyle = selItem.color;
+      ctx.font = 'italic 12px sans-serif';
+      ctx.fillText('"' + selItem.flavor + '"', W / 2, 486);
+
+      if (barMsg) {
+        ctx.fillStyle = '#ffeb3b';
+        ctx.font = 'bold 12px sans-serif';
+        ctx.fillText(barMsg, W / 2, 506);
+      }
+
+      ctx.fillStyle = '#777';
+      ctx.font = '11px sans-serif';
+      const tabHint = (net.mode === 'local') ? 'TAB switch player  ·  ' : '';
+      ctx.fillText('WASD move  ·  G buy/equip  ·  F unequip  ·  ' + tabHint + 'L-SHIFT back', W / 2, 526);
+      ctx.textAlign = 'left';
+      return;
+    }
+
     if (menuStage === 'movesets') {
       // Reference panel showing every character's specials.
       ctx.fillStyle = '#ffeb3b';
@@ -11442,15 +12029,33 @@
     ctx.font = '18px sans-serif';
     ctx.fillText(`Player ${winner.index + 1} takes the round`, W/2, H/2 + 16);
 
+    // Tabs payout breakdown — shows WHY you earned what you earned, so the
+    // economy reads as a reward for playing rather than a mystery number.
+    if (lastPayout) {
+      const p = lastPayout;
+      ctx.fillStyle = '#ffe14a';
+      ctx.font = 'bold 16px sans-serif';
+      ctx.fillText('+ ' + p.total + ' TABS', W/2, H/2 + 44);
+      ctx.fillStyle = '#888';
+      ctx.font = '11px sans-serif';
+      const parts = ['damage ' + p.dmg, 'KOs ' + p.ko];
+      if (p.win) parts.push('win ' + p.win);
+      if (Math.abs(p.mult - 1) > 0.01) parts.push('×' + p.mult.toFixed(2) + ' item bonus');
+      ctx.fillText(parts.join('   ·   ') + '      (wallet: ' + bar.tabs + ')', W/2, H/2 + 62);
+    }
+
+    // Prompts sit below the payout block when there is one, so the two don't
+    // collide.
+    const promptY = H/2 + (lastPayout ? 94 : 60);
     ctx.fillStyle = '#aaa';
     ctx.font = '14px sans-serif';
     if (net.mode !== 'local' && net.connected) {
-      ctx.fillText('Press ENTER for rematch  ·  ESC to leave the lobby', W/2, H/2 + 60);
+      ctx.fillText('Press ENTER for rematch  ·  ESC to leave the lobby', W/2, promptY);
       ctx.fillStyle = '#888';
       ctx.font = '12px sans-serif';
-      ctx.fillText('ROOM ' + net.roomCode, W/2, H/2 + 84);
+      ctx.fillText('ROOM ' + net.roomCode, W/2, promptY + 24);
     } else {
-      ctx.fillText('Press ENTER to return to character select', W/2, H/2 + 60);
+      ctx.fillText('Press ENTER to return to character select  ·  spend tabs at THE BAR', W/2, promptY);
     }
     ctx.textAlign = 'left';
   }
@@ -11958,6 +12563,9 @@
     const alive = fighters.filter(f => f.stocks > 0);
     if (alive.length === 1 && !winner) {
       winner = alive[0];
+      // Cash out the match before the outro plays, so the GAME OVER screen
+      // can show the breakdown.
+      awardTabs(winner.index === localSlotIndex());
       state = STATE.OVER;
       // Trigger the dramatic outro: slow-mo "THAT'S GAME!!" → win taunt → continue.
       endgame.phase = 'finalKO';
@@ -12120,6 +12728,7 @@
   // loop starts since they only touch elements that exist in the static
   // HTML at top of file.
   loadCustomSprites();
+  loadBar();                 // wallet + inventory + loadouts
   initSpriteManagerUI();
 
   requestAnimationFrame(loop);
